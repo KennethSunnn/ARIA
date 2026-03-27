@@ -1,0 +1,1853 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARIA 智能助手</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f5f7fb;
+            --surface: #ffffff;
+            --surface-soft: #f8fafc;
+            --text: #0f172a;
+            --muted: #64748b;
+            --primary: #2563eb;
+            --primary-soft: rgba(37, 99, 235, 0.1);
+            --border: #e5e7eb;
+            --success: #059669;
+            --warning: #d97706;
+            --danger: #dc2626;
+        }
+        body {
+            background-color: var(--bg);
+            font-family: 'SourceHanSans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: var(--text);
+        }
+        .top-nav {
+            background-color: var(--surface);
+            border-bottom: 1px solid var(--border);
+        }
+        .tab-nav {
+            background-color: var(--surface);
+            border-bottom: 1px solid var(--border);
+        }
+        .tab-content {
+            margin-top: 20px;
+        }
+        .card {
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+            overflow: hidden;
+        }
+        .btn-primary {
+            background-color: var(--primary);
+            border: none;
+        }
+        .btn-primary:hover {
+            background-color: #1d4ed8;
+        }
+        .card-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+        }
+        .chat-message {
+            margin-bottom: 16px;
+        }
+        #conversation-list .session-item {
+            font-size: 13px;
+            line-height: 1.35;
+        }
+        .user-message {
+            text-align: right;
+        }
+        .user-message .message-content {
+            background: linear-gradient(135deg, #dbeafe, #e0e7ff);
+            border-radius: 14px;
+            padding: 12px 14px;
+            display: inline-block;
+            max-width: 78%;
+            border-bottom-right-radius: 6px;
+            color: #0b3aa8;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        .ai-message .message-content {
+            background-color: var(--surface-soft);
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 12px 14px;
+            display: inline-block;
+            max-width: 78%;
+            border-bottom-left-radius: 6px;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        #chat .input-group .form-control {
+            font-size: 13px;
+        }
+        .execution-log {
+            font-size: 12px;
+            line-height: 1.45;
+            padding: 10px 12px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            background-color: var(--surface-soft);
+            border: 1px solid #e2e8f0;
+        }
+        .workflow-agent-card {
+            background: #f8fbff;
+            border: 1px solid #dbe7ff;
+            border-radius: 12px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .agent-avatar-btn {
+            border: none;
+            background: transparent;
+            padding: 0;
+            cursor: pointer;
+        }
+        .agent-avatar {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2563eb, #4f46e5);
+            color: #fff;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+        }
+        .agent-avatar.pm { background: linear-gradient(135deg, #2563eb, #1d4ed8); }
+        .agent-avatar.exe { background: linear-gradient(135deg, #7c3aed, #6d28d9); }
+        .agent-avatar.qa { background: linear-gradient(135deg, #059669, #047857); }
+        .agent-avatar.ks { background: linear-gradient(135deg, #ea580c, #c2410c); }
+        .agent-avatar.ve { background: linear-gradient(135deg, #0891b2, #0e7490); }
+        .agent-avatar.se { background: linear-gradient(135deg, #db2777, #be185d); }
+        .agent-avatar.other { background: linear-gradient(135deg, #475569, #334155); }
+        .agent-status-chip {
+            border-radius: 999px;
+            padding: 2px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid transparent;
+            white-space: nowrap;
+        }
+        .agent-status-running {
+            color: #1d4ed8;
+            background: #dbeafe;
+            border-color: #bfdbfe;
+        }
+        .agent-status-success {
+            color: #047857;
+            background: #d1fae5;
+            border-color: #a7f3d0;
+        }
+        .agent-status-error {
+            color: #b91c1c;
+            background: #fee2e2;
+            border-color: #fecaca;
+        }
+        .agent-detail-panel {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: #fff;
+            border: 1px dashed #cbd5e1;
+        }
+        .agent-detail-kv {
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+        .sidebar {
+            height: 52vh;
+            min-height: 420px;
+            overflow-y: auto;
+        }
+        .chat-area {
+            height: 52vh;
+            min-height: 360px;
+            overflow-y: auto;
+            background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+        }
+        .log-area {
+            height: 52vh;
+            min-height: 360px;
+            overflow-y: auto;
+            background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+        }
+        .chat-panels-row {
+            align-items: stretch;
+        }
+        .chat-panels-row > .panel-col {
+            display: flex;
+        }
+        .chat-panels-row > .panel-col > .panel-card {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-panels-row > .panel-col > .panel-card > .card-body {
+            flex: 1 1 auto;
+        }
+        #main-tabs .nav-link {
+            color: var(--muted);
+            border: none;
+            border-bottom: 2px solid transparent;
+            border-radius: 0;
+            padding: 12px 16px;
+            font-weight: 600;
+        }
+        #main-tabs .nav-link.active {
+            color: var(--primary);
+            background: transparent;
+            border-bottom-color: var(--primary);
+        }
+        .text-muted {
+            color: var(--muted) !important;
+        }
+        .methodology-item {
+            border-bottom: 1px solid var(--border);
+            transition: background-color .18s ease;
+            cursor: pointer;
+        }
+        .methodology-item:hover {
+            background: #f8fafc;
+        }
+        .methodology-item:last-child {
+            border-bottom: none;
+        }
+        .app-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            color: var(--primary);
+            background: var(--primary-soft);
+        }
+        .panel-title {
+            font-weight: 700;
+        }
+        .panel-controls .btn {
+            padding: 2px 8px;
+            font-size: 12px;
+        }
+        .panel-maximized {
+            transition: all .2s ease;
+        }
+        .collapsed-panels-bar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .collapsed-panel-chip {
+            border: 1px dashed #94a3b8;
+            border-radius: 999px;
+            background: #f8fafc;
+            color: #334155;
+            font-size: 12px;
+            padding: 4px 10px;
+            cursor: pointer;
+        }
+        .workflow-story-wrap {
+            border: 1px solid #e2e8f0;
+            background: linear-gradient(180deg, #f8fbff 0%, #f1f5f9 100%);
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 10px;
+            overflow-x: hidden;
+            overflow-y: auto;
+            min-height: 460px;
+            cursor: grab;
+        }
+        .workflow-story-wrap.story-collapsed {
+            min-height: 120px;
+            cursor: default;
+            overflow: hidden;
+        }
+        .workflow-story-wrap.story-dragging {
+            cursor: grabbing;
+            user-select: none;
+        }
+        .workflow-story-svg {
+            min-width: 100%;
+            min-height: 480px;
+            width: 100%;
+            display: block;
+        }
+        .story-section-text {
+            font-size: 12px;
+            fill: #334155;
+            font-weight: 600;
+        }
+        .story-mainline {
+            stroke: #cbd5e1;
+            stroke-width: 1;
+        }
+        .story-timeline-line {
+            stroke: #cbd5e1;
+            stroke-width: 2;
+        }
+        .story-timeline-dot {
+            fill: #ffffff;
+            stroke: #94a3b8;
+            stroke-width: 2;
+        }
+        .story-collapsed-hint {
+            border: 1px dashed #cbd5e1;
+            background: #ffffff;
+            color: #64748b;
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 12px;
+            text-align: center;
+        }
+        .story-node-main rect {
+            fill: #fff7ed;
+            stroke: #fb923c;
+            stroke-width: 1.4;
+        }
+        .story-node-agent rect {
+            fill: #eef2ff;
+            stroke: #818cf8;
+            stroke-width: 1.2;
+        }
+        .story-node-event rect {
+            fill: #f8fafc;
+            stroke: #94a3b8;
+            stroke-width: 1.1;
+        }
+        .story-bubble-link {
+            fill: none;
+            stroke: #a5b4fc;
+            stroke-width: 1.6;
+            stroke-linecap: round;
+            stroke-dasharray: 5 4;
+        }
+        .story-mainband {
+            fill: #ffffff;
+            opacity: 0.65;
+        }
+        .story-node rect {
+            fill: #ffffff;
+            stroke: #93c5fd;
+            stroke-width: 1.2;
+            rx: 10;
+            ry: 10;
+            filter: drop-shadow(0 2px 6px rgba(15, 23, 42, 0.08));
+        }
+        .story-node text {
+            fill: #0f172a;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        .story-node text.node-sub {
+            fill: #64748b;
+            font-size: 11px;
+        }
+        .story-node.event-success rect {
+            stroke: #34d399;
+        }
+        .story-node.event-error rect {
+            stroke: #f87171;
+        }
+        .story-node.event-running rect {
+            stroke: #60a5fa;
+        }
+        .story-edge-main {
+            stroke: #64748b;
+            stroke-width: 1.4;
+            fill: none;
+            marker-end: url(#story-arrow-main);
+        }
+        .story-edge-branch {
+            stroke: #94a3b8;
+            stroke-width: 1.1;
+            fill: none;
+            stroke-dasharray: 4 3;
+            marker-end: url(#story-arrow-branch);
+        }
+        .story-node:hover rect {
+            stroke-width: 1.8;
+        }
+        .compact-event-stream {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            background: #ffffff;
+            padding: 8px;
+        }
+        .event-chat-item {
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            cursor: pointer;
+            font-size: 12px;
+            margin-bottom: 8px;
+            background: #f8fafc;
+        }
+        .event-chat-item:hover {
+            background: #eef2ff;
+            border-color: #c7d2fe;
+        }
+        .event-chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .event-chat-role {
+            font-size: 11px;
+            color: #64748b;
+        }
+        .event-chat-content {
+            margin-top: 6px;
+            color: #0f172a;
+        }
+        .event-chat-status-reason {
+            margin-top: 6px;
+            padding: 6px 8px;
+            border-radius: 8px;
+            font-size: 11px;
+            border: 1px solid #fecaca;
+            background: #fef2f2;
+            color: #991b1b;
+        }
+        .event-chat-status-reason.cancelled {
+            border-color: #fde68a;
+            background: #fffbeb;
+            color: #92400e;
+        }
+        .event-chat-detail {
+            margin-top: 8px;
+            border-top: 1px dashed #cbd5e1;
+            padding-top: 8px;
+            display: none;
+            color: #334155;
+        }
+        .event-chat-item.expanded .event-chat-detail {
+            display: block;
+        }
+        .story-fullscreen {
+            position: fixed !important;
+            inset: 16px;
+            z-index: 1055;
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25);
+            padding: 12px;
+            overflow: auto;
+        }
+        .story-fullscreen .workflow-story-svg {
+            min-height: 78vh;
+        }
+        .input-group .form-control:focus {
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+            border-color: rgba(37, 99, 235, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <nav class="top-nav py-3 px-4">
+        <div class="container-fluid">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <div class="d-flex align-items-center">
+                        <div class="bg-primary text-white rounded-2 d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px;">
+                            <i class="fa fa-robot fa-lg"></i>
+                        </div>
+                        <div>
+                            <h1 class="h4 mb-0 font-weight-bold">Aria</h1>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 text-right">
+                    <div class="d-inline-block">
+                        <span class="app-badge"><i class="fa fa-magic" style="margin-right:6px;"></i> ARIA v2</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 标签页导航 -->
+    <div class="tab-nav">
+        <div class="container-fluid">
+            <ul class="nav nav-tabs" id="main-tabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat" type="button" role="tab" aria-controls="chat" aria-selected="true">
+                        <i class="fa fa-comments mr-2"></i>对话主面板
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="methodology-tab" data-bs-toggle="tab" data-bs-target="#methodology" type="button" role="tab" aria-controls="methodology" aria-selected="false">
+                        <i class="fa fa-book mr-2"></i>经验中心
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button" role="tab" aria-controls="settings" aria-selected="false">
+                        <i class="fa fa-cog mr-2"></i>系统设置
+                    </button>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- 主内容区 -->
+    <div class="container-fluid tab-content" id="main-tab-content">
+        <!-- 对话主面板 -->
+        <div class="tab-pane fade show active" id="chat" role="tabpanel" aria-labelledby="chat-tab">
+            <div class="collapsed-panels-bar d-none" id="collapsed-panels-bar"></div>
+            <div class="row chat-panels-row">
+                <!-- 会话列表侧边栏 -->
+                <div class="col-md-3 order-md-3 panel-col" id="panel-col-left">
+                    <div class="card panel-card" id="panel-card-left">
+                        <div class="card-header">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 class="card-title mb-0 panel-title">会话列表</h5>
+                                <div class="d-flex align-items-center gap-2 panel-controls">
+                                    <button class="btn btn-primary btn-sm">
+                                        <i class="fa fa-plus"></i> 新建
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm panel-collapse-btn" data-panel="left" title="折叠">
+                                        <i class="fa fa-minus"></i>
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm panel-maximize-btn" data-panel="left" title="放大">
+                                        <i class="fa fa-expand"></i>
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm panel-restore-btn" data-panel="left" title="还原">
+                                        <i class="fa fa-undo"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <input type="text" id="conversation-search-input" class="form-control form-control-sm" placeholder="搜索会话">
+                            </div>
+                            <div class="sidebar" id="conversation-list">
+                                <div class="text-center text-muted p-3" id="chat-sessions-empty-hint">
+                                    暂无会话记录
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 对话主区域 -->
+                <div class="col-md-3 order-md-1 panel-col" id="panel-col-center">
+                    <div class="card panel-card" id="panel-card-center">
+                        <div class="card-header">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 id="chat-panel-title" class="card-title mb-0 panel-title">对话框</h5>
+                                <div class="d-flex align-items-center gap-2 panel-controls">
+                                    <button class="btn btn-outline-secondary btn-sm" id="chat-clear-btn">
+                                        <i class="fa fa-trash"></i> 清空
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm panel-collapse-btn" data-panel="center" title="折叠">
+                                        <i class="fa fa-minus"></i>
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm panel-maximize-btn" data-panel="center" title="放大">
+                                        <i class="fa fa-expand"></i>
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm panel-restore-btn" data-panel="center" title="还原">
+                                        <i class="fa fa-undo"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body chat-area">
+                            <div class="text-center text-muted" id="chat-empty-hint">
+                                还没有对话记录。输入问题后点击“发送”开始。
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <div class="input-group">
+                                <input type="text" class="form-control" placeholder="输入问题...">
+                                <button class="btn btn-primary" id="chat-send-btn">
+                                    <i class="fa fa-paper-plane"></i> 发送
+                                </button>
+                                <button class="btn btn-outline-danger" id="chat-cancel-btn" disabled style="display: none;">
+                                    <i class="fa fa-stop"></i> 中止
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 执行日志和多Agent协同侧边栏 -->
+                <div class="col-md-6 order-md-2 panel-col" id="panel-col-right">
+                    <!-- 执行日志 -->
+                    <div class="card panel-card" id="panel-card-right">
+                        <div class="card-header">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 class="card-title mb-0 panel-title">协作日志</h5>
+                                <div class="d-flex align-items-center gap-2 panel-controls">
+                                    <span class="text-muted" style="font-size:12px;">统一协作视图</span>
+                                    <button class="btn btn-outline-secondary btn-sm panel-collapse-btn" data-panel="right" title="折叠">
+                                        <i class="fa fa-minus"></i>
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm panel-maximize-btn" data-panel="right" title="放大">
+                                        <i class="fa fa-expand"></i>
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm panel-restore-btn" data-panel="right" title="还原">
+                                        <i class="fa fa-undo"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    <div class="card-body log-area" id="execution-log-area">
+                            <div class="text-center text-muted" id="execution-empty-hint">
+                                暂无日志。发送任务后这里会显示处理过程。
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 经验中心 -->
+        <div class="tab-pane fade" id="methodology" role="tabpanel" aria-labelledby="methodology-tab">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="card-title mb-0">经验中心</h5>
+                            <p class="text-sm text-muted mb-0">管理系统内置和自定义的经验方案模板，提升任务处理效率</p>
+                        </div>
+                        <div>
+                            <button class="btn btn-outline-secondary btn-sm mr-2">
+                                <i class="fa fa-upload"></i> 导入
+                            </button>
+                            <button class="btn btn-primary btn-sm">
+                                <i class="fa fa-plus"></i> 新建经验
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <div class="input-group">
+                                <input id="methodology-search-input" type="text" class="form-control" placeholder="搜索经验名称、标签、描述">
+                                <button id="methodology-search-btn" class="btn btn-primary" type="button">
+                                    <i class="fa fa-search"></i> 搜索
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select">
+                                <option value="">全部分类</option>
+                                <option value="数据分析">数据分析</option>
+                                <option value="产品设计">产品设计</option>
+                                <option value="项目管理">项目管理</option>
+                                <option value="其他">其他</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select">
+                                <option value="">全部标签</option>
+                                <option value="Python">Python</option>
+                                <option value="爬虫">爬虫</option>
+                                <option value="数据分析">数据分析</option>
+                                <option value="产品设计">产品设计</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <!-- 左侧经验列表 -->
+                        <div class="col-md-4">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <h6 class="card-title mb-0">经验列表</h6>
+                                        <button class="btn btn-outline-danger btn-sm" id="delete-selected-methodologies-btn" type="button">
+                                            批量删除选中
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="card-body p-0">
+                                    <div class="sidebar" id="methodology-list">
+                                        <div class="p-3 text-center text-muted">
+                                            正在加载经验...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 右侧经验详情 -->
+                        <div class="col-md-8">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h6 class="card-title mb-0">选择一条经验查看详情</h6>
+                                </div>
+                                <div class="card-body" id="methodology-detail-body">
+                                    <div class="text-center text-muted">
+                                        <i class="fa fa-folder-open fa-3x mb-3"></i>
+                                        <p>请从左侧列表中选择一条经验查看详细内容</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 系统设置 -->
+        <div class="tab-pane fade" id="settings" role="tabpanel" aria-labelledby="settings-tab">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">系统设置</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-4">
+                        <h6 class="font-weight-bold mb-3">大模型 API（环境变量）</h6>
+                        <p class="text-muted small mb-2">
+                            出于安全与开源协作考虑，密钥不在网页内保存。请在项目根目录将 <code>.env.example</code> 复制为 <code>.env</code>，
+                            设置 <code>VOLCANO_API_KEY</code>（或与后端一致的 <code>ARK_API_KEY</code>），保存后重启 <code>python web_app.py</code>。
+                        </p>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="refresh-api-key-status-btn">
+                            <i class="fa fa-refresh mr-1"></i>刷新配置状态
+                        </button>
+                        <div class="mt-2" id="api-key-status">
+                            <span class="text-muted"><i class="fa fa-info-circle mr-1"></i> 正在检测…</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            let currentConversationId = null;
+            let workflowPollTimer = null;
+            let workflowEventSource = null;
+            let currentWorkflowEvents = [];
+            let currentLogs = [];
+            let workflowEventIds = new Set();
+            let selectedMethodologyIds = new Set();
+            let currentTaskId = null;
+            let pendingWorkflowEvents = [];
+            let currentRequestId = null;
+            let isTaskRunning = false;
+            let autoFocusLatestNode = true;
+            let isStoryFullscreen = false;
+            let isStoryCollapsed = true;
+            let showStoryMilestonesOnly = true;
+            let showStoryExecutionDetails = false;
+            let storyViewMode = 'compact'; // compact | detailed
+            let storyDragState = { active: false, startY: 0, startTop: 0 };
+            const panelState = {
+                left: { collapsed: false },
+                center: { collapsed: false },
+                right: { collapsed: false },
+            };
+            let layoutMode = 'default'; // default | left_max | center_max | right_max
+
+            function escapeHtml(str) {
+                return $('<div/>').text(str == null ? '' : String(str)).html();
+            }
+
+            function formatTimestamp(ts) {
+                if (!ts) return '';
+                try {
+                    const d = new Date(ts * 1000);
+                    return d.toLocaleString();
+                } catch (e) {
+                    return '';
+                }
+            }
+
+            function roleBadge(role) {
+                return `<span class="badge bg-light text-dark">${escapeHtml(role || '成员')}</span>`;
+            }
+
+            function statusMeta(status) {
+                if (status === 'success' || status === 'completed') return { text: '完成', cls: 'agent-status-success' };
+                if (status === 'error') return { text: '异常', cls: 'agent-status-error' };
+                return { text: '进行中', cls: 'agent-status-running' };
+            }
+
+            function agentInitial(name) {
+                const s = (name || '').trim();
+                if (!s) return '员';
+                return escapeHtml(s.slice(0, 1));
+            }
+
+            function roleAvatarMeta(role) {
+                const r = String(role || '');
+                if (r.includes('PM') || r.includes('项目经理')) return { code: 'PM', cls: 'pm' };
+                if (r.includes('QA') || r.includes('质检')) return { code: 'QA', cls: 'qa' };
+                if (r.includes('KS') || r.includes('知识')) return { code: 'KS', cls: 'ks' };
+                if (r.includes('VE') || r.includes('视觉')) return { code: 'VE', cls: 've' };
+                if (r.includes('SE') || r.includes('语音')) return { code: 'SE', cls: 'se' };
+                if (r.includes('EXE') || r.includes('执行')) return { code: 'EX', cls: 'exe' };
+                return { code: agentInitial(r), cls: 'other' };
+            }
+
+            function renderEventDetail(detail) {
+                if (!detail || typeof detail !== 'object' || !Object.keys(detail).length) {
+                    return '<div class="text-muted">暂无具体工作明细。</div>';
+                }
+                return Object.entries(detail).map(([k, v]) => {
+                    const value = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                    return `<div class="agent-detail-kv"><strong>${escapeHtml(k)}：</strong>${escapeHtml(value)}</div>`;
+                }).join('');
+            }
+
+            function applyPanelLayout() {
+                const panelMeta = {
+                    left: { sel: '#panel-col-left', defaultClass: 'col-md-3 order-md-3' },
+                    center: { sel: '#panel-col-center', defaultClass: 'col-md-3 order-md-1' },
+                    right: { sel: '#panel-col-right', defaultClass: 'col-md-6 order-md-2' },
+                };
+                const modeToPanel = {
+                    left_max: 'left',
+                    center_max: 'center',
+                    right_max: 'right',
+                };
+                const maxPanel = modeToPanel[layoutMode] || null;
+
+                Object.entries(panelMeta).forEach(([key, meta]) => {
+                    const $el = $(meta.sel);
+                    $el.removeClass('d-none col-md-2 col-md-3 col-md-6 col-md-8 col-md-12 order-md-1 order-md-2 order-md-3 panel-maximized');
+                    const shouldCollapse = maxPanel ? key !== maxPanel : panelState[key].collapsed;
+                    if (shouldCollapse) {
+                        $el.addClass('d-none');
+                        return;
+                    }
+                    if (maxPanel) {
+                        $el.addClass('col-md-12 panel-maximized');
+                    } else {
+                        $el.addClass(meta.defaultClass);
+                    }
+                });
+
+                const collapsed = [];
+                ['left', 'center', 'right'].forEach((key) => {
+                    if (maxPanel ? key !== maxPanel : panelState[key].collapsed) collapsed.push(key);
+                });
+                const nameMap = { left: '会话列表', center: '对话框', right: '协作日志' };
+                const $bar = $('#collapsed-panels-bar');
+                $bar.empty();
+                collapsed.forEach((key) => {
+                    $bar.append(`<button class="collapsed-panel-chip" data-panel="${key}" type="button">展开 ${nameMap[key]}</button>`);
+                });
+                if (collapsed.length) {
+                    $bar.removeClass('d-none');
+                } else {
+                    $bar.addClass('d-none');
+                }
+            }
+
+            function buildTimelineEvents(events, options) {
+                const opts = options || {};
+                const showDetails = !!opts.showDetails;
+                const milestonesOnly = !!opts.milestonesOnly;
+                const milestoneStages = new Set(['task_parse', 'task_split', 'quality_check', 'method_save', 'agent_destroy', 'task_cancelled']);
+                const sorted = [...(events || [])].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                return sorted.filter((evt) => {
+                    if (!evt) return false;
+                    if (evt.stage === 'agent_execute') return showDetails;
+                    if (milestonesOnly) return milestoneStages.has(evt.stage);
+                    return true;
+                });
+            }
+
+            function renderStoryGraph(events) {
+                const $graph = $('#workflow-story-container');
+                if (!$graph.length) return;
+                if (isStoryCollapsed) {
+                    $graph.html('<div class="story-collapsed-hint">Story Graph 已折叠。点击“展开图谱”可查看任务分发详情。</div>');
+                    return;
+                }
+                if (!events || !events.length) {
+                    $graph.html('<div class="text-muted">暂无工作流数据。</div>');
+                    return;
+                }
+                const timelineEvents = buildTimelineEvents(events, { showDetails: true, milestonesOnly: false });
+                const taskSplit = timelineEvents.find((evt) => evt.stage === 'task_split');
+                const executeEvents = timelineEvents.filter((evt) => evt.stage === 'agent_execute');
+                const qualityEvt = [...timelineEvents].reverse().find((evt) => evt.stage === 'quality_check');
+                const saveEvt = [...timelineEvents].reverse().find((evt) => evt.stage === 'method_save');
+                const doneEvt = [...timelineEvents].reverse().find((evt) => evt.stage === 'agent_destroy');
+                if (!taskSplit && !executeEvents.length) {
+                    $graph.html('<div class="text-muted">当前暂无可视化分发数据。</div>');
+                    return;
+                }
+
+                function clipText(text, maxChars) {
+                    const s = String(text || '');
+                    if (s.length <= maxChars) return s;
+                    return `${s.slice(0, Math.max(1, maxChars - 1))}…`;
+                }
+
+                const rootTitle = (taskSplit && taskSplit.summary) ? taskSplit.summary : '任务分发中心';
+                const grouped = new Map();
+                executeEvents.forEach((evt) => {
+                    const key = `${evt.agent_name || evt.agent_code || '协作者'}|${evt.agent_role || '成员'}`;
+                    if (!grouped.has(key)) grouped.set(key, []);
+                    grouped.get(key).push(evt);
+                });
+                const agentGroups = Array.from(grouped.entries());
+                const width = 1160;
+                const rowH = 116;
+                const rootX = 48;
+                const rootY = 42;
+                const rootW = 220;
+                const rootH = 72;
+                const agentX = 340;
+                const agentW = 220;
+                const agentH = 60;
+                const eventX = 620;
+                const eventW = 300;
+                const eventH = 54;
+                const closeX = 950;
+                const closeW = 170;
+                const closeH = 52;
+                const topY = 40;
+                const height = Math.max(420, topY + Math.max(agentGroups.length, 1) * rowH + 70);
+                const svg = [];
+                svg.push(`<svg class="workflow-story-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg">`);
+
+                svg.push(`<g class="story-node story-node-main"><rect x="${rootX}" y="${rootY}" width="${rootW}" height="${rootH}" rx="14" ry="14"></rect><text x="${rootX + 12}" y="${rootY + 30}">任务分发</text><text class="node-sub" x="${rootX + 12}" y="${rootY + 52}">${escapeHtml(clipText(rootTitle, 16))}</text></g>`);
+
+                const agentCenters = [];
+                agentGroups.forEach(([groupKey, evts], idx) => {
+                    const [agentName, agentRole] = groupKey.split('|');
+                    const y = topY + idx * rowH;
+                    const linkY = y + agentH / 2;
+                    agentCenters.push({ x: eventX + eventW, y: y + agentH / 2 });
+                    svg.push(`<path class="story-bubble-link" d="M ${rootX + rootW} ${rootY + rootH / 2} C 290 ${rootY + rootH / 2}, 300 ${linkY}, ${agentX} ${linkY}"></path>`);
+                    svg.push(`<g class="story-node story-node-agent"><rect x="${agentX}" y="${y}" width="${agentW}" height="${agentH}" rx="12" ry="12"></rect><text x="${agentX + 10}" y="${y + 24}">${escapeHtml(clipText(agentName, 10))}</text><text class="node-sub" x="${agentX + 10}" y="${y + 44}">${escapeHtml(clipText(agentRole, 12))}</text></g>`);
+
+                    const shouldShowDetailed = showStoryExecutionDetails || storyViewMode === 'detailed';
+                    const shown = shouldShowDetailed ? evts.slice(-2) : evts.slice(-1);
+                    shown.forEach((evt, j) => {
+                        const ey = y + j * (eventH + 8);
+                        const statusCls = evt.status === 'success' ? 'event-success' : (evt.status === 'error' ? 'event-error' : 'event-running');
+                        const eventAttr = evt.event_id ? `data-event-id="${escapeHtml(evt.event_id)}"` : '';
+                        const title = evt.summary || evt.stage || '执行事件';
+                        svg.push(`<path class="story-bubble-link" d="M ${agentX + agentW} ${y + agentH / 2} C 590 ${y + agentH / 2}, 600 ${ey + eventH / 2}, ${eventX} ${ey + eventH / 2}"></path>`);
+                        svg.push(`<g class="story-node story-node-event ${statusCls}" ${eventAttr}><rect x="${eventX}" y="${ey}" width="${eventW}" height="${eventH}" rx="10" ry="10"></rect><text x="${eventX + 10}" y="${ey + 22}">${escapeHtml(clipText(title, 20))}</text><text class="node-sub" x="${eventX + 10}" y="${ey + 42}">${escapeHtml(clipText(formatTimestamp(evt.timestamp), 20))}</text></g>`);
+                    });
+                });
+
+                const closeNodes = [
+                    { evt: qualityEvt, label: '汇总校验' },
+                    { evt: saveEvt, label: '知识沉淀' },
+                    { evt: doneEvt, label: '输出闭环' },
+                ].filter((x) => x.evt);
+                if (closeNodes.length) {
+                    const baseY = Math.max(rootY + rootH + 34, topY + Math.max(agentGroups.length, 1) * rowH - 30);
+                    let prevX = null;
+                    let prevY = null;
+                    closeNodes.forEach((node, idx) => {
+                        const x = closeX;
+                        const y = baseY + idx * (closeH + 16);
+                        const statusCls = node.evt.status === 'success' ? 'event-success' : (node.evt.status === 'error' ? 'event-error' : 'event-running');
+                        const eventAttr = node.evt.event_id ? `data-event-id="${escapeHtml(node.evt.event_id)}"` : '';
+                        if (idx === 0) {
+                            agentCenters.forEach((p) => {
+                                svg.push(`<path class="story-bubble-link" d="M ${p.x} ${p.y} C 1060 ${p.y}, 1080 ${y + closeH / 2}, ${x} ${y + closeH / 2}"></path>`);
+                            });
+                        } else if (prevX !== null && prevY !== null) {
+                            svg.push(`<path class="story-bubble-link" d="M ${prevX + closeW} ${prevY + closeH / 2} C 1120 ${prevY + closeH / 2}, 1120 ${y + closeH / 2}, ${x} ${y + closeH / 2}"></path>`);
+                        }
+                        const sub = node.evt.summary || node.evt.stage || node.label;
+                        svg.push(`<g class="story-node story-node-event ${statusCls}" ${eventAttr}><rect x="${x}" y="${y}" width="${closeW}" height="${closeH}" rx="10" ry="10"></rect><text x="${x + 10}" y="${y + 22}">${escapeHtml(node.label)}</text><text class="node-sub" x="${x + 10}" y="${y + 41}">${escapeHtml(clipText(sub, 12))}</text></g>`);
+                        prevX = x;
+                        prevY = y;
+                    });
+                }
+                svg.push('</svg>');
+                $graph.html(svg.join(''));
+                if (autoFocusLatestNode) {
+                    requestAnimationFrame(() => {
+                        const $wrap = $('.workflow-story-wrap');
+                        if (!$wrap.length) return;
+                        const $latest = $graph.find('.story-node[data-event-id]').last();
+                        if (!$latest.length) return;
+                        const nodeEl = $latest.get(0);
+                        const bbox = nodeEl.getBBox ? nodeEl.getBBox() : null;
+                        if (!bbox) return;
+                        $wrap.scrollTop(Math.max(0, bbox.y - 100));
+                    });
+                }
+            }
+
+            function renderCompactEventStream(events) {
+                const $stream = $('#compact-event-stream');
+                if (!$stream.length) return;
+                if (!events || !events.length) {
+                    $stream.html('<div class="text-muted">暂无事件。</div>');
+                    return;
+                }
+                const items = buildMergedEventStream(events).slice(-24);
+                const html = items.map((evt) => {
+                    const status = evt.status || 'running';
+                    const statusText = (status === 'success' || status === 'completed')
+                        ? '完成'
+                        : (status === 'cancelled' ? '已取消' : (status === 'error' ? '异常' : '进行中'));
+                    const avatar = roleAvatarMeta(evt.agent_role || evt.agent_code || '成员');
+                    const detailHtml = renderEventDetail(evt.detail || {});
+                    const reason = (status === 'error' || status === 'cancelled')
+                        ? (evt?.detail?.reason || evt?.detail?.message || evt?.detail?.error || '')
+                        : '';
+                    const reasonLabel = status === 'cancelled' ? '取消原因' : '异常原因';
+                    const reasonClass = status === 'cancelled' ? ' cancelled' : '';
+                    const reasonHtml = reason
+                        ? `<div class="event-chat-status-reason${reasonClass}">${reasonLabel}：${escapeHtml(String(reason))}</div>`
+                        : '';
+                    return `<div class="event-chat-item" data-event-id="${escapeHtml(evt.event_id || '')}">
+                        <div class="event-chat-header">
+                            <div class="d-flex align-items-center">
+                                <span class="agent-avatar ${avatar.cls}" style="width:28px;height:28px;font-size:11px;">${escapeHtml(avatar.code)}</span>
+                                <div class="ms-2">
+                                    <div><strong>${escapeHtml(evt.agent_name || evt.agent_code || '协作者')}</strong></div>
+                                    <div class="event-chat-role">${escapeHtml(evt.agent_role || '成员')}</div>
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                <div class="text-muted">${escapeHtml(formatTimestamp(evt.timestamp))}</div>
+                                <div class="text-muted">${statusText}</div>
+                            </div>
+                        </div>
+                        <div class="event-chat-content">${escapeHtml(evt.summary || evt.stage || '')}</div>
+                        ${reasonHtml}
+                        <div class="text-primary mt-1" style="font-size:11px;cursor:pointer;" data-detail-toggle="1">展开详情</div>
+                        <div class="event-chat-detail">${detailHtml}</div>
+                    </div>`;
+                }).join('');
+                $stream.html(html);
+            }
+
+            function buildMergedEventStream(events) {
+                const sorted = [...(events || [])].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                const merged = [];
+                const keyToIndex = new Map();
+
+                function eventKey(evt) {
+                    if (!evt) return null;
+                    const stage = evt.stage || 'unknown_stage';
+                    const agent = evt.agent_code || evt.agent_name || 'agent';
+                    const subTaskId = evt?.detail?.sub_task_id || '';
+                    return `${stage}|${agent}|${subTaskId || '-'}`;
+                }
+
+                sorted.forEach((evt) => {
+                    const key = eventKey(evt);
+                    const idx = key ? keyToIndex.get(key) : undefined;
+                    if (idx === undefined) {
+                        if (key) keyToIndex.set(key, merged.length);
+                        merged.push({ ...evt });
+                        return;
+                    }
+                    const prev = merged[idx];
+                    merged[idx] = {
+                        ...prev,
+                        ...evt,
+                        event_id: evt.event_id || prev.event_id,
+                        timestamp: evt.timestamp || prev.timestamp,
+                        detail: { ...(prev.detail || {}), ...(evt.detail || {}) },
+                    };
+                });
+
+                // 收口：任务结束后不应残留 running 状态
+                const hasCancelled = sorted.some((evt) => evt?.stage === 'task_cancelled');
+                const hasFinished = sorted.some((evt) => evt?.stage === 'agent_destroy' && evt?.status === 'success');
+                if (hasCancelled || hasFinished) {
+                    for (let i = merged.length - 1; i >= 0; i -= 1) {
+                        const item = merged[i];
+                        if ((item.status || 'running') !== 'running') continue;
+                        merged[i] = {
+                            ...item,
+                            status: hasCancelled ? 'cancelled' : 'completed',
+                        };
+                    }
+                }
+
+                return merged;
+            }
+
+            function renderConversationMessages(messages) {
+                const $chat = $('#chat .chat-area');
+                $chat.empty();
+                if (!messages || !messages.length) {
+                    $chat.html('<div class="text-center text-muted" id="chat-empty-hint">还没有对话记录。输入问题后点击“发送”开始。</div>');
+                    return;
+                }
+                messages.forEach(msg => {
+                    if ((msg.role || '') === 'user') {
+                        $chat.append(`
+                            <div class="chat-message user-message">
+                                <div class="message-content">${escapeHtml(msg.content || '')}</div>
+                            </div>
+                        `);
+                    } else {
+                        $chat.append(`
+                            <div class="chat-message ai-message">
+                                <div class="message-content">${escapeHtml(msg.content || '').replace(/\n/g, '<br>')}</div>
+                            </div>
+                        `);
+                    }
+                });
+                $chat.scrollTop($chat.prop('scrollHeight'));
+            }
+
+            function renderWorkflowAndLogs(logs, workflowEvents) {
+                currentLogs = logs || [];
+                currentWorkflowEvents = workflowEvents || [];
+                workflowEventIds = new Set((currentWorkflowEvents || []).map(e => e.event_id).filter(Boolean));
+                const $area = $('#execution-log-area');
+                $area.empty();
+                const events = currentWorkflowEvents || [];
+                const rawLogs = currentLogs || [];
+                if (!events.length && !rawLogs.length) {
+                    $area.append('<div class="text-center text-muted">暂无日志。发送任务后这里会显示处理过程。</div>');
+                    return;
+                }
+                $area.append('<div class="compact-event-stream"><div class="text-muted mb-2" style="font-size:12px;">协作对话流</div><div id="compact-event-stream"></div></div>');
+                $area.append(`<div class="workflow-story-wrap ${isStoryCollapsed ? 'story-collapsed' : ''}">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="text-muted" style="font-size:12px;">Story Graph</div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button id="story-collapse-toggle" class="btn btn-outline-secondary btn-sm" type="button">${isStoryCollapsed ? '展开图谱' : '收起图谱'}</button>
+                            <button id="story-view-mode-toggle" class="btn btn-outline-secondary btn-sm" type="button">${storyViewMode === 'detailed' ? '图谱: 详细' : '图谱: 简洁'}</button>
+                            <label class="text-muted" style="font-size:12px;cursor:pointer;">
+                                <input id="story-auto-focus-toggle" type="checkbox" ${autoFocusLatestNode ? 'checked' : ''} style="margin-right:4px;">
+                                自动聚焦最新节点
+                            </label>
+                            <label class="text-muted" style="font-size:12px;cursor:pointer;">
+                                <input id="story-milestone-toggle" type="checkbox" ${showStoryMilestonesOnly ? 'checked' : ''} style="margin-right:4px;">
+                                仅看关键节点
+                            </label>
+                            <label class="text-muted" style="font-size:12px;cursor:pointer;">
+                                <input id="story-detail-toggle" type="checkbox" ${showStoryExecutionDetails ? 'checked' : ''} style="margin-right:4px;">
+                                展开执行细节
+                            </label>
+                            <button id="story-fullscreen-toggle" class="btn btn-outline-secondary btn-sm" type="button">${isStoryFullscreen ? '退出全屏' : '全屏查看'}</button>
+                        </div>
+                    </div>
+                    <div id="workflow-story-container"></div>
+                </div>`);
+                renderCompactEventStream(events);
+                renderStoryGraph(events);
+                if (isStoryFullscreen) {
+                    $('#execution-log-area .workflow-story-wrap').addClass('story-fullscreen');
+                }
+            }
+
+            function appendWorkflowEventToDom(evt) {
+                const $story = $('#workflow-story-container');
+                if (!$story.length) {
+                    renderWorkflowAndLogs(currentLogs, currentWorkflowEvents);
+                    return;
+                }
+                renderStoryGraph(currentWorkflowEvents);
+                renderCompactEventStream(currentWorkflowEvents);
+                const $area = $('#execution-log-area');
+                $area.scrollTop($area.prop('scrollHeight'));
+            }
+
+            function loadWorkflowEvents() {
+                if (!currentConversationId) return;
+                $.ajax({
+                    url: '/api/workflow_events',
+                    type: 'GET',
+                    data: { conversation_id: currentConversationId },
+                    success: function(resp) {
+                        const events = resp.workflow_events || [];
+                        $.ajax({
+                            url: `/api/conversations/${currentConversationId}`,
+                            type: 'GET',
+                            success: function(detailResp) {
+                                const conv = detailResp.conversation || {};
+                                const messages = conv.messages || [];
+                                const lastMeta = messages.length ? (messages[messages.length - 1].meta || {}) : {};
+                                renderWorkflowAndLogs(lastMeta.logs || [], events);
+                            }
+                        });
+                    }
+                });
+            }
+
+            function startWorkflowPolling() {
+                if (workflowPollTimer) clearInterval(workflowPollTimer);
+                workflowPollTimer = setInterval(loadWorkflowEvents, 800);
+            }
+
+            function stopWorkflowPolling() {
+                if (workflowPollTimer) clearInterval(workflowPollTimer);
+                workflowPollTimer = null;
+            }
+
+            function stopWorkflowStream() {
+                if (workflowEventSource) {
+                    workflowEventSource.close();
+                    workflowEventSource = null;
+                }
+                stopWorkflowPolling();
+            }
+
+            function startWorkflowStream() {
+                stopWorkflowStream();
+                if (!currentConversationId) return;
+
+                // 先拉一次快照，避免连接建立前为空
+                loadWorkflowEvents();
+
+                try {
+                    workflowEventSource = new EventSource(`/api/workflow_stream?conversation_id=${encodeURIComponent(currentConversationId)}`);
+                    workflowEventSource.onmessage = function(evt) {
+                        try {
+                            const payload = JSON.parse(evt.data || '{}');
+                            if (payload.type === 'keepalive' || payload.type === 'connected') {
+                                return;
+                            }
+                            // 仅展示当前 request_id 对应的协作日志
+                            if (payload.request_id) {
+                                if (!currentRequestId) return;
+                                if (payload.request_id !== currentRequestId) return;
+                            } else {
+                                // 若当前在执行新任务且后端未返回 request_id，则很可能是旧事件，直接忽略
+                                if (currentRequestId) return;
+                            }
+                            // 增量追加：只处理当前会话未见过的事件
+                            if (payload.conversation_id && payload.conversation_id !== currentConversationId) {
+                                return;
+                            }
+                            if (payload.event_id && workflowEventIds.has(payload.event_id)) {
+                                return;
+                            }
+                            if (payload.event_id) {
+                                workflowEventIds.add(payload.event_id);
+                            }
+                            currentWorkflowEvents.push(payload);
+                            appendWorkflowEventToDom(payload);
+                            return;
+                        } catch (e) {}
+                        // JSON 解析失败再回退全量刷新
+                        loadWorkflowEvents();
+                    };
+                    workflowEventSource.onerror = function() {
+                        // SSE 断线时降级为轮询，保证可用性
+                        if (!workflowPollTimer) {
+                            startWorkflowPolling();
+                        }
+                    };
+                } catch (e) {
+                    startWorkflowPolling();
+                }
+            }
+
+            function renderConversationList(list) {
+                const $list = $('#conversation-list');
+                $list.empty();
+                if (!list || !list.length) {
+                    $list.html('<div class="text-center text-muted p-3" id="chat-sessions-empty-hint">暂无会话记录</div>');
+                    return;
+                }
+                list.forEach(item => {
+                    const activeClass = item.conversation_id === currentConversationId ? 'bg-primary bg-opacity-10' : '';
+                    $list.append(`
+                        <div class="session-item mb-2 p-2 rounded ${activeClass}" data-id="${escapeHtml(item.conversation_id)}" style="cursor:pointer;">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="font-weight-bold">${escapeHtml(item.title || '新会话')}</span>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="text-xs text-muted">${escapeHtml(formatTimestamp(item.updated_at))}</span>
+                                    <button class="btn btn-outline-secondary btn-sm archive-conversation-btn" data-id="${escapeHtml(item.conversation_id)}" type="button">归档</button>
+                                </div>
+                            </div>
+                            <div class="text-sm text-muted">${escapeHtml(item.last_message || '')}</div>
+                        </div>
+                    `);
+                });
+            }
+
+            function loadConversations() {
+                $.ajax({
+                    url: '/api/conversations',
+                    type: 'GET',
+                    success: function(resp) {
+                        const list = resp.conversations || [];
+                        renderConversationList(list);
+                        if (!list.length && !currentConversationId) {
+                            createConversation('新会话');
+                            return;
+                        }
+                        if (!currentConversationId && list.length) {
+                            loadConversationDetail(list[0].conversation_id);
+                        }
+                    }
+                });
+            }
+
+            function loadConversationDetail(conversationId) {
+                $.ajax({
+                    url: `/api/conversations/${conversationId}`,
+                    type: 'GET',
+                    success: function(resp) {
+                        const conv = resp.conversation || {};
+                        currentConversationId = conv.conversation_id || null;
+                        $('#chat-panel-title').text('对话框');
+                        renderConversationMessages(conv.messages || []);
+                        const messages = conv.messages || [];
+                        const lastMeta = messages.length ? (messages[messages.length - 1].meta || {}) : {};
+                        renderWorkflowAndLogs(lastMeta.logs || [], conv.workflow_events || []);
+                        loadConversations();
+                        startWorkflowStream();
+                    }
+                });
+            }
+
+            function createConversation(title = '新会话') {
+                $.ajax({
+                    url: '/api/conversations',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ title }),
+                    success: function(resp) {
+                        const conv = resp.conversation || {};
+                        if (!conv.conversation_id) return;
+                        currentConversationId = conv.conversation_id;
+                        renderConversationMessages([]);
+                        renderWorkflowAndLogs([], []);
+                        loadConversations();
+                        startWorkflowStream();
+                    }
+                });
+            }
+
+            function renderMethodologyList(methodologies) {
+                const list = methodologies || [];
+                const $list = $('#methodology-list');
+                $list.empty();
+                if (!list.length) {
+                    $list.append('<div class="p-3 text-center text-muted">暂无经验</div>');
+                    return;
+                }
+                list.forEach(function(m) {
+                    const title = m.title || m.scene || '未命名';
+                    const category = m.category || '通用';
+                    const successCount = m.success_count ?? 0;
+                    const methodId = m.method_id || '';
+                    const checked = selectedMethodologyIds.has(methodId) ? 'checked' : '';
+                    $list.append(`
+                        <div class="p-3 methodology-item" data-id="${escapeHtml(methodId)}">
+                            <div class="d-flex align-items-start justify-content-between">
+                                <div class="font-weight-medium pr-2">${escapeHtml(title)}</div>
+                                <input class="form-check-input method-select-checkbox" type="checkbox" data-id="${escapeHtml(methodId)}" ${checked}>
+                            </div>
+                            <div class="text-xs text-muted mt-1">分类: ${escapeHtml(category)}</div>
+                            <div class="text-xs text-muted mt-1">成功次数: ${escapeHtml(String(successCount))}</div>
+                        </div>
+                    `);
+                });
+            }
+
+            function renderMethodologyDetail(method) {
+                const methodId = method.method_id || '';
+                const title = method.title || method.scene || '未命名';
+                const category = method.category || '通用';
+                const scene = method.scene || method.scenario || '未命名';
+                const keywords = method.keywords || [];
+                const solveSteps = method.solve_steps || [];
+                const applicableRange = method.applicable_range || '';
+                const successCount = method.success_count ?? 0;
+                const keywordText = Array.isArray(keywords) ? keywords.join('、') : String(keywords || '');
+                const stepsHtml = Array.isArray(solveSteps) && solveSteps.length
+                    ? `<ol>${solveSteps.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ol>`
+                    : `<p class="text-muted">暂无解决步骤</p>`;
+
+                $('#methodology-detail-body').html(`
+                    <div class="methodology-detail-content">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div class="text-muted" style="font-size:12px;">ID: ${escapeHtml(methodId)}</div>
+                            <div>
+                                <button class="btn btn-outline-secondary btn-sm mr-2" id="refresh-methodologies-btn" type="button">刷新</button>
+                                <button class="btn btn-outline-danger btn-sm" id="delete-methodology-btn" data-method-id="${escapeHtml(methodId)}" type="button">删除</button>
+                            </div>
+                        </div>
+                        <p><strong>标题：</strong>${escapeHtml(title)}</p>
+                        <div class="mb-2">
+                            <strong>分类：</strong>
+                            <select id="method-category-select" class="form-select form-select-sm d-inline-block" style="width: 240px;">
+                                <option value="数据分析/报表" ${category === '数据分析/报表' ? 'selected' : ''}>数据分析/报表</option>
+                                <option value="开发工程/代码实现" ${category === '开发工程/代码实现' ? 'selected' : ''}>开发工程/代码实现</option>
+                                <option value="产品设计/需求" ${category === '产品设计/需求' ? 'selected' : ''}>产品设计/需求</option>
+                                <option value="运营增长/市场" ${category === '运营增长/市场' ? 'selected' : ''}>运营增长/市场</option>
+                                <option value="文案内容/知识整理" ${category === '文案内容/知识整理' ? 'selected' : ''}>文案内容/知识整理</option>
+                                <option value="通用/其他" ${category === '通用/其他' || category === '通用' ? 'selected' : ''}>通用/其他</option>
+                            </select>
+                            <button class="btn btn-outline-primary btn-sm" id="save-method-category-btn" data-method-id="${escapeHtml(methodId)}" type="button">保存分类</button>
+                        </div>
+                        <p><strong>场景：</strong>${escapeHtml(scene)}</p>
+                        <p><strong>关键词：</strong>${escapeHtml(keywordText)}</p>
+                        <p><strong>适用范围：</strong>${escapeHtml(applicableRange || '通用')}</p>
+                        <p><strong>成功次数：</strong>${escapeHtml(String(successCount))}</p>
+                        <div><strong>步骤：</strong>${stepsHtml}</div>
+                    </div>
+                `);
+            }
+
+            function loadMethodologies() {
+                $.ajax({
+                    url: '/api/get_methodologies',
+                    type: 'GET',
+                    success: function(resp) {
+                        renderMethodologyList(resp.methodologies || []);
+                    }
+                });
+            }
+
+            function loadApiKeyStatus() {
+                $.ajax({
+                    url: '/api/check_api_key',
+                    type: 'GET',
+                    success: function(apiResponse) {
+                        const has = apiResponse.has_api_key;
+                        if (has) {
+                            $('#api-key-status').html('<span class="text-success"><i class="fa fa-check-circle mr-1"></i> 已检测到 API 密钥环境变量</span>');
+                        } else {
+                            $('#api-key-status').html('<span class="text-warning"><i class="fa fa-exclamation-circle mr-1"></i> 未配置 VOLCANO_API_KEY，将使用模拟模式</span>');
+                        }
+                    },
+                    error: function() {
+                        $('#api-key-status').html('<span class="text-danger"><i class="fa fa-exclamation-circle mr-1"></i> 无法检测环境变量状态</span>');
+                    }
+                });
+            }
+
+            function appendOptimisticUserMessage(text) {
+                const $chat = $('#chat .chat-area');
+                $chat.find('#chat-empty-hint').remove();
+                $chat.append(`<div class="chat-message user-message"><div class="message-content">${escapeHtml(text)}</div></div>`);
+                $chat.append('<div class="chat-message ai-message" id="temp-ai-message"><div class="message-content">正在处理您的请求...</div></div>');
+                $chat.scrollTop($chat.prop('scrollHeight'));
+            }
+
+            function sendMessage() {
+                const $sendBtn = $('#chat-send-btn');
+                const $cancelBtn = $('#chat-cancel-btn');
+                const $input = $('#chat .input-group input');
+                const userInput = ($input.val() || '').trim();
+                if (!userInput) return;
+                // 为本次任务生成前端 request_id，协作日志/SSE 也会带同一个 request_id 供前端过滤
+                const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+                currentRequestId = requestId;
+
+                // 隐藏发送按钮，显示中止按钮
+                $sendBtn.hide();
+                $cancelBtn.show().prop('disabled', false);
+                $input.prop('disabled', true);
+                isTaskRunning = true;
+                // 开始新任务前清空当前任务态，避免 SSE/增量渲染把上一轮协作日志混进来
+                currentLogs = [];
+                currentWorkflowEvents = [];
+                workflowEventIds = new Set();
+                renderWorkflowAndLogs([], []);
+                appendOptimisticUserMessage(userInput);
+                $input.val('');
+
+                function processWithConversationId(convId) {
+                    $.ajax({
+                        url: '/api/process_input',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ user_input: userInput, conversation_id: convId, request_id: requestId }),
+                        success: function(resp) {
+                            currentConversationId = resp.conversation_id || currentConversationId;
+                            currentTaskId = resp.task_id || currentTaskId;
+                            const escaped = escapeHtml(resp.result || '').replace(/\n/g, '<br>');
+                            $('#temp-ai-message .message-content').html(escaped);
+                            $('#temp-ai-message').removeAttr('id');
+                            renderWorkflowAndLogs(resp.logs || [], resp.workflow_events || []);
+                            loadConversations();
+                            loadMethodologies();
+                        },
+                        error: function() {
+                            $('#temp-ai-message .message-content').html('<span class="text-danger">请求失败，请稍后重试</span>');
+                        },
+                        complete: function() {
+                            // 恢复发送按钮，隐藏中止按钮
+                            $sendBtn.show();
+                            $cancelBtn.hide().prop('disabled', true);
+                            $input.prop('disabled', false);
+                            isTaskRunning = false;
+                        }
+                    });
+                }
+
+                if (!currentConversationId) {
+                    // 先创建会话，避免后端用 user_input[:24] 作为标题导致出现“你好”之类标题
+                    $.ajax({
+                        url: '/api/conversations',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ title: '新会话' }),
+                        success: function(resp) {
+                            const conv = resp.conversation || {};
+                            currentConversationId = conv.conversation_id || currentConversationId;
+                            $('#chat-panel-title').text('对话框');
+                            startWorkflowStream();
+                            processWithConversationId(currentConversationId);
+                        },
+                        error: function() {
+                            $('#temp-ai-message .message-content').html('<span class="text-danger">会话创建失败，请稍后重试</span>');
+                            // 恢复发送按钮，隐藏中止按钮
+                            $sendBtn.show();
+                            $cancelBtn.hide().prop('disabled', true);
+                            $input.prop('disabled', false);
+                            isTaskRunning = false;
+                        }
+                    });
+                } else {
+                    processWithConversationId(currentConversationId);
+                }
+            }
+
+            // 初始化
+            loadApiKeyStatus();
+            loadMethodologies();
+            loadConversations();
+
+            // 事件绑定
+            $('#chat .btn-primary:contains("新建")').click(function() {
+                createConversation('新会话');
+            });
+            $('#chat-clear-btn').click(function() {
+                if (!currentConversationId) return;
+                renderConversationMessages([]);
+                renderWorkflowAndLogs([], []);
+            });
+            $('.panel-collapse-btn').click(function() {
+                const panel = $(this).attr('data-panel');
+                if (!panel || !panelState[panel]) return;
+                if (layoutMode !== 'default') {
+                    layoutMode = 'default';
+                    panelState.left.collapsed = false;
+                    panelState.center.collapsed = false;
+                    panelState.right.collapsed = false;
+                }
+                panelState[panel].collapsed = !panelState[panel].collapsed;
+                applyPanelLayout();
+            });
+            $('.panel-maximize-btn').click(function() {
+                const panel = $(this).attr('data-panel');
+                if (!panel || !panelState[panel]) return;
+                const targetMode = `${panel}_max`;
+                if (layoutMode === targetMode) {
+                    layoutMode = 'default';
+                    panelState.left.collapsed = false;
+                    panelState.center.collapsed = false;
+                    panelState.right.collapsed = false;
+                } else {
+                    layoutMode = targetMode;
+                }
+                applyPanelLayout();
+            });
+            $('.panel-restore-btn').click(function() {
+                layoutMode = 'default';
+                panelState.left.collapsed = false;
+                panelState.center.collapsed = false;
+                panelState.right.collapsed = false;
+                applyPanelLayout();
+            });
+            $('#collapsed-panels-bar').on('click', '.collapsed-panel-chip', function() {
+                const panel = $(this).attr('data-panel');
+                if (!panel || !panelState[panel]) return;
+                layoutMode = 'default';
+                panelState[panel].collapsed = false;
+                applyPanelLayout();
+            });
+            $('#chat-cancel-btn').click(function() {
+                if (!isTaskRunning || !currentRequestId) return;
+                $.ajax({
+                    url: '/api/cancel_task',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ conversation_id: currentConversationId, request_id: currentRequestId }),
+                    success: function(resp) {
+                        if (resp.success) {
+                            $('#execution-log-area').append('<div class="execution-log text-warning">已发送中止指令，等待任务停止...</div>');
+                        }
+                    }
+                });
+            });
+            $('#chat-send-btn').click(sendMessage);
+            $('#chat .input-group input').on('keypress', function(e) {
+                if (e.which === 13) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+            $('#conversation-list').on('click', '.session-item', function() {
+                const id = $(this).attr('data-id');
+                if (!id) return;
+                loadConversationDetail(id);
+            });
+            $('#conversation-list').on('click', '.archive-conversation-btn', function(e) {
+                e.stopPropagation();
+                const id = $(this).attr('data-id');
+                if (!id) return;
+                $.ajax({
+                    url: `/api/conversations/${id}/archive`,
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ archived: true }),
+                    success: function(resp) {
+                        if (resp.success) {
+                            if (id === currentConversationId) {
+                                createConversation('新会话');
+                            }
+                            loadConversations();
+                        }
+                    }
+                });
+            });
+            $('#conversation-search-input').on('input', function() {
+                const q = ($(this).val() || '').trim().toLowerCase();
+                $('#conversation-list .session-item').each(function() {
+                    const text = ($(this).text() || '').toLowerCase();
+                    $(this).toggle(!q || text.includes(q));
+                });
+            });
+
+            $('#execution-log-area').on('click', '.story-node', function() {
+                const eventId = $(this).attr('data-event-id');
+                if (!eventId) return;
+                $('#execution-log-area .event-chat-item').removeClass('bg-primary bg-opacity-10');
+                $(`#execution-log-area .event-chat-item[data-event-id="${eventId}"]`).addClass('bg-primary bg-opacity-10');
+            });
+            $('#execution-log-area').on('click', '.event-chat-item', function(e) {
+                if ($(e.target).attr('data-detail-toggle') === '1') return;
+                const eventId = $(this).attr('data-event-id');
+                if (!eventId) return;
+                $('#execution-log-area .event-chat-item').removeClass('bg-primary bg-opacity-10');
+                $(this).addClass('bg-primary bg-opacity-10');
+                $('#execution-log-area .story-node').removeClass('active-story-node');
+                const $node = $(`#execution-log-area .story-node[data-event-id="${eventId}"]`);
+                if ($node.length) {
+                    const nodeEl = $node.get(0);
+                    const bbox = nodeEl.getBBox ? nodeEl.getBBox() : null;
+                    if (bbox) {
+                        const $wrap = $('.workflow-story-wrap');
+                        $wrap.scrollTop(Math.max(0, bbox.y - 100));
+                    }
+                }
+            });
+            $('#execution-log-area').on('click', '[data-detail-toggle="1"]', function(e) {
+                e.stopPropagation();
+                const $item = $(this).closest('.event-chat-item');
+                const expanded = $item.hasClass('expanded');
+                $item.toggleClass('expanded', !expanded);
+                $(this).text(expanded ? '展开详情' : '收起详情');
+            });
+            $('#execution-log-area').on('change', '#story-auto-focus-toggle', function() {
+                autoFocusLatestNode = $(this).is(':checked');
+            });
+            $('#execution-log-area').on('change', '#story-milestone-toggle', function() {
+                showStoryMilestonesOnly = $(this).is(':checked');
+                renderStoryGraph(currentWorkflowEvents);
+            });
+            $('#execution-log-area').on('change', '#story-detail-toggle', function() {
+                showStoryExecutionDetails = $(this).is(':checked');
+                renderStoryGraph(currentWorkflowEvents);
+            });
+            $('#execution-log-area').on('click', '#story-collapse-toggle', function() {
+                isStoryCollapsed = !isStoryCollapsed;
+                const $wrap = $('#execution-log-area .workflow-story-wrap');
+                $wrap.toggleClass('story-collapsed', isStoryCollapsed);
+                $(this).text(isStoryCollapsed ? '展开图谱' : '收起图谱');
+                renderStoryGraph(currentWorkflowEvents);
+            });
+            $('#execution-log-area').on('click', '#story-view-mode-toggle', function() {
+                storyViewMode = storyViewMode === 'compact' ? 'detailed' : 'compact';
+                $(this).text(storyViewMode === 'detailed' ? '图谱: 详细' : '图谱: 简洁');
+                renderStoryGraph(currentWorkflowEvents);
+            });
+            $('#execution-log-area').on('click', '#story-fullscreen-toggle', function() {
+                isStoryFullscreen = !isStoryFullscreen;
+                const $wrap = $('#execution-log-area .workflow-story-wrap');
+                if (!$wrap.length) return;
+                if (isStoryFullscreen && isStoryCollapsed) {
+                    isStoryCollapsed = false;
+                    $wrap.removeClass('story-collapsed');
+                    $('#story-collapse-toggle').text('收起图谱');
+                    renderStoryGraph(currentWorkflowEvents);
+                }
+                $wrap.toggleClass('story-fullscreen', isStoryFullscreen);
+                $(this).text(isStoryFullscreen ? '退出全屏' : '全屏查看');
+            });
+            $('#execution-log-area').on('mousedown', '.workflow-story-wrap', function(e) {
+                if (e.which !== 1) return;
+                if ($(e.target).closest('button,input,a,.story-node,[data-detail-toggle]').length) return;
+                const $wrap = $(this);
+                storyDragState.active = true;
+                storyDragState.startY = e.pageY;
+                storyDragState.startTop = $wrap.scrollTop();
+                $wrap.addClass('story-dragging');
+                e.preventDefault();
+            });
+            $(document).on('mousemove', function(e) {
+                if (!storyDragState.active) return;
+                const $wrap = $('#execution-log-area .workflow-story-wrap').first();
+                if (!$wrap.length) return;
+                const delta = e.pageY - storyDragState.startY;
+                $wrap.scrollTop(storyDragState.startTop - delta);
+            });
+            $(document).on('mouseup mouseleave', function() {
+                if (!storyDragState.active) return;
+                storyDragState.active = false;
+                $('#execution-log-area .workflow-story-wrap').removeClass('story-dragging');
+            });
+
+            function performMethodologySearch() {
+                const kw = $('#methodology-search-input').val().trim();
+                if (!kw) {
+                    loadMethodologies();
+                    return;
+                }
+                $.ajax({
+                    url: '/api/search_methodology',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ keyword: kw }),
+                    success: function(resp) {
+                        renderMethodologyList(resp.results || []);
+                    }
+                });
+            }
+            $('#methodology-search-btn').click(performMethodologySearch);
+            $('#methodology-search-input').on('keypress', function(e) {
+                if (e.which === 13) {
+                    e.preventDefault();
+                    performMethodologySearch();
+                }
+            });
+            $('#methodology-list').on('click', '.methodology-item', function(event) {
+                // 如果点击的是批量选择checkbox，则不进入详情
+                if ($(event.target).closest('.method-select-checkbox').length) return;
+                const id = $(this).attr('data-id');
+                if (!id) return;
+                $('#methodology-list .methodology-item').removeClass('bg-primary bg-opacity-10');
+                $(this).addClass('bg-primary bg-opacity-10');
+                $.ajax({
+                    url: '/api/get_methodology',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ methodology_id: id }),
+                    success: function(resp) {
+                        renderMethodologyDetail(resp.methodology || {});
+                    }
+                });
+            });
+            $('#methodology-list').on('click', '.method-select-checkbox', function(e) {
+                e.stopPropagation();
+                const id = $(this).attr('data-id');
+                if (!id) return;
+                if ($(this).is(':checked')) {
+                    selectedMethodologyIds.add(id);
+                } else {
+                    selectedMethodologyIds.delete(id);
+                }
+            });
+            $('#methodology-detail-body').on('click', '#refresh-methodologies-btn', loadMethodologies);
+            $('#methodology-detail-body').on('click', '#delete-methodology-btn', function() {
+                const id = $(this).attr('data-method-id');
+                if (!id) return;
+                if (!confirm('确定删除该经验吗？')) return;
+                $.ajax({
+                    url: '/api/delete_methodology',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ methodology_id: id }),
+                    success: function(resp) {
+                        if (resp.success) {
+                            loadMethodologies();
+                            $('#methodology-detail-body').html('<div class="text-center text-muted">已删除经验</div>');
+                        }
+                    }
+                });
+            });
+            $('#delete-selected-methodologies-btn').click(function() {
+                const ids = Array.from(selectedMethodologyIds);
+                if (!ids.length) {
+                    alert('请先勾选要删除的经验');
+                    return;
+                }
+                if (!confirm(`确定批量删除 ${ids.length} 条经验吗？`)) return;
+                $.ajax({
+                    url: '/api/delete_methodologies_batch',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ methodology_ids: ids }),
+                    success: function(resp) {
+                        if (resp.success) {
+                            selectedMethodologyIds.clear();
+                            loadMethodologies();
+                            $('#methodology-detail-body').html('<div class="text-center text-muted">已批量删除选中经验</div>');
+                        } else {
+                            alert('批量删除未生效，请重试');
+                        }
+                    },
+                    error: function() {
+                        alert('批量删除失败，请稍后重试');
+                    }
+                });
+            });
+            $('#methodology-detail-body').on('click', '#save-method-category-btn', function() {
+                const id = $(this).attr('data-method-id');
+                const category = $('#method-category-select').val();
+                if (!id || !category) return;
+                $.ajax({
+                    url: '/api/update_methodology_category',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ methodology_id: id, category }),
+                    success: function(resp) {
+                        if (resp.success) {
+                            loadMethodologies();
+                            if (resp.methodology) {
+                                renderMethodologyDetail(resp.methodology);
+                            }
+                        } else {
+                            alert('分类保存失败，请重试');
+                        }
+                    },
+                    error: function() {
+                        alert('分类保存失败，请重试');
+                    }
+                });
+            });
+
+            $('#refresh-api-key-status-btn').click(function() {
+                const $st = $('#api-key-status');
+                $st.html('<span class="text-muted"><i class="fa fa-refresh fa-spin mr-1"></i> 正在检测…</span>');
+                loadApiKeyStatus();
+            });
+
+            window.addEventListener('beforeunload', function() {
+                stopWorkflowStream();
+            });
+            applyPanelLayout();
+        });
+    </script>
+</body>
+</html>

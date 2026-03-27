@@ -1,0 +1,5 @@
+python-dotenv
+requests
+gradio
+flask
+volcengine-python-sdk[ark]

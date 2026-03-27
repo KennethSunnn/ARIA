@@ -1,0 +1,143 @@
+import json
+import os
+import time
+import uuid
+from typing import Any
+
+
+class ConversationLibrary:
+    def __init__(self, file_path: str = "data/conversations/conversations.json"):
+        self.file_path = file_path
+        os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
+        if not os.path.exists(self.file_path):
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+
+    def _load(self) -> list[dict[str, Any]]:
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def _save(self, conversations: list[dict[str, Any]]) -> None:
+        with open(self.file_path, "w", encoding="utf-8") as f:
+            json.dump(conversations, f, ensure_ascii=False, indent=2)
+
+    def _summary(self, text: str, limit: int = 36) -> str:
+        text = (text or "").strip()
+        if len(text) <= limit:
+            return text or "新会话"
+        return text[:limit] + "..."
+
+    def _is_small_talk(self, text: str) -> bool:
+        s = (text or "").strip().lower()
+        if not s:
+            return True
+        compact = "".join(ch for ch in s if ch.isalnum() or ("\u4e00" <= ch <= "\u9fff"))
+        greetings = ["你好", "您好", "hello", "hi", "hey", "在吗", "谢谢", "thank", "早上好", "晚上好"]
+        return any(g in s for g in greetings) and len(compact) <= 12
+
+    def _default_title(self) -> str:
+        return "新会话 " + time.strftime("%H:%M")
+
+    def create_conversation(self, title: str | None = None) -> dict[str, Any]:
+        now = time.time()
+        title_value = (title or "").strip()
+        if not title_value or title_value == "新会话" or self._is_small_talk(title_value):
+            title_value = self._default_title()
+        conversation = {
+            "conversation_id": str(uuid.uuid4()),
+            "title": title_value,
+            "archived": False,
+            "status": "active",
+            "created_at": now,
+            "updated_at": now,
+            "last_message": "",
+            "messages": [],
+            "workflow_events": [],
+        }
+        conversations = self._load()
+        conversations.append(conversation)
+        self._save(conversations)
+        return conversation
+
+    def list_conversations(self, archived: bool | None = None) -> list[dict[str, Any]]:
+        conversations = self._load()
+        if archived is not None:
+            conversations = [c for c in conversations if bool(c.get("archived", False)) == archived]
+        conversations.sort(key=lambda c: c.get("updated_at", 0), reverse=True)
+        return [
+            {
+                "conversation_id": c.get("conversation_id"),
+                "title": c.get("title", "新会话"),
+                "archived": bool(c.get("archived", False)),
+                "status": c.get("status", "active"),
+                "created_at": c.get("created_at", 0),
+                "updated_at": c.get("updated_at", 0),
+                "last_message": c.get("last_message", ""),
+                "message_count": len(c.get("messages", [])),
+            }
+            for c in conversations
+        ]
+
+    def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
+        conversations = self._load()
+        for c in conversations:
+            if c.get("conversation_id") == conversation_id:
+                return c
+        return None
+
+    def append_message(self, conversation_id: str, role: str, content: str, meta: dict[str, Any] | None = None) -> bool:
+        conversations = self._load()
+        now = time.time()
+        for c in conversations:
+            if c.get("conversation_id") == conversation_id:
+                c.setdefault("messages", []).append(
+                    {
+                        "message_id": str(uuid.uuid4()),
+                        "role": role,
+                        "content": content,
+                        "meta": meta or {},
+                        "timestamp": now,
+                    }
+                )
+                if role == "user":
+                    current_title = str(c.get("title", "") or "").strip()
+                    if (
+                        not current_title
+                        or current_title == "新会话"
+                        or current_title.startswith("新会话 ")
+                        or self._is_small_talk(current_title)
+                    ) and not self._is_small_talk(content):
+                        c["title"] = self._summary(content)
+                c["last_message"] = self._summary(content)
+                c["updated_at"] = now
+                self._save(conversations)
+                return True
+        return False
+
+    def set_archived(self, conversation_id: str, archived: bool) -> bool:
+        conversations = self._load()
+        now = time.time()
+        for c in conversations:
+            if c.get("conversation_id") == conversation_id:
+                c["archived"] = bool(archived)
+                c["status"] = "archived" if archived else "active"
+                c["updated_at"] = now
+                self._save(conversations)
+                return True
+        return False
+
+    def replace_workflow_events(self, conversation_id: str, events: list[dict[str, Any]]) -> bool:
+        conversations = self._load()
+        now = time.time()
+        for c in conversations:
+            if c.get("conversation_id") == conversation_id:
+                c["workflow_events"] = events
+                c["updated_at"] = now
+                self._save(conversations)
+                return True
+        return False
+
