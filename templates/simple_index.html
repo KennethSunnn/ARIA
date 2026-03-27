@@ -1365,6 +1365,9 @@
                         renderConversationMessages(conv.messages || []);
                         const messages = conv.messages || [];
                         const lastMeta = messages.length ? (messages[messages.length - 1].meta || {}) : {};
+                        if (lastMeta.pending_actions && (lastMeta.pending_actions.actions || []).length) {
+                            renderPendingActionsCard(lastMeta.pending_actions);
+                        }
                         renderWorkflowAndLogs(lastMeta.logs || [], conv.workflow_events || []);
                         loadConversations();
                         startWorkflowStream();
@@ -1534,6 +1537,78 @@
                 $chat.scrollTop($chat.prop('scrollHeight'));
             }
 
+            function formatActionPlanHtml(plan) {
+                const actions = (plan && plan.actions) || [];
+                if (!actions.length) {
+                    return `<div class="text-muted">${tr('app.actionPlan.empty', 'No executable actions identified.')}</div>`;
+                }
+                const items = actions.map((a, idx) => {
+                    const type = escapeHtml(a.type || 'unknown');
+                    const target = escapeHtml(a.target || 'unknown');
+                    const risk = escapeHtml((a.risk || 'medium').toUpperCase());
+                    const reason = escapeHtml(a.reason || tr('app.actionPlan.noReason', 'No reason provided'));
+                    return `<li><strong>#${idx + 1}</strong> type=${type}, target=${target}, risk=${risk}<br><span class="text-muted">${reason}</span></li>`;
+                }).join('');
+                return `<ol class="mb-2" style="padding-left:18px;">${items}</ol>`;
+            }
+
+            function renderPendingActionsCard(plan) {
+                if (!plan || !plan.actions || !plan.actions.length) return;
+                const $chat = $('#chat .chat-area');
+                const summary = escapeHtml(plan.summary || tr('app.actionPlan.summaryFallback', 'An actionable plan is ready.'));
+                const planHtml = formatActionPlanHtml(plan);
+                const needDouble = !!plan.requires_double_confirmation;
+                $chat.append(`
+                    <div class="chat-message ai-message pending-action-card">
+                        <div class="message-content">
+                            <div><strong>${tr('app.actionPlan.title', 'Execution Plan (Confirmation Required)')}</strong></div>
+                            <div class="text-muted mb-2">${summary}</div>
+                            ${planHtml}
+                            ${needDouble ? `<div class="text-warning mb-2">${tr('app.actionPlan.highRiskHint', 'High-risk actions require a second confirmation.')}</div>` : ''}
+                            <div class="d-flex align-items-center" style="gap:8px;">
+                                <button class="btn btn-sm btn-primary confirm-action-btn" type="button">${tr('app.actionPlan.confirmBtn', 'Confirm and Execute')}</button>
+                                <span class="text-muted">${tr('app.actionPlan.confirmHint', 'No action will run before confirmation.')}</span>
+                            </div>
+                        </div>
+                    </div>
+                `);
+                $chat.scrollTop($chat.prop('scrollHeight'));
+            }
+
+            function confirmPendingActions() {
+                if (!currentConversationId) return;
+                const $chat = $('#chat .chat-area');
+                const $card = $chat.find('.pending-action-card').last();
+                const $btn = $card.find('.confirm-action-btn');
+                const force = $btn.attr('data-force') === '1';
+                $btn.prop('disabled', true).text(tr('app.actionPlan.confirming', 'Executing...'));
+
+                $.ajax({
+                    url: '/api/confirm_actions',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ conversation_id: currentConversationId, request_id: currentRequestId || '', force }),
+                    success: function(resp) {
+                        const text = escapeHtml(resp.result || tr('app.actionPlan.executed', 'Actions executed.')).replace(/\n/g, '<br>');
+                        $chat.append(`<div class="chat-message ai-message"><div class="message-content">${text}</div></div>`);
+                        renderWorkflowAndLogs(resp.logs || [], resp.workflow_events || []);
+                        loadConversations();
+                        loadMethodologies();
+                    },
+                    error: function(xhr) {
+                        if (xhr && xhr.status === 409 && xhr.responseJSON && xhr.responseJSON.requires_double_confirmation) {
+                            const msg = xhr.responseJSON.message || tr('app.actionPlan.doubleConfirmNeeded', 'Second confirmation is required for high-risk actions.');
+                            $chat.append(`<div class="chat-message ai-message"><div class="message-content"><span class="text-warning">${escapeHtml(msg)}</span></div></div>`);
+                            $btn.attr('data-force', '1').prop('disabled', false).text(tr('app.actionPlan.doubleConfirmBtn', 'High Risk: Click Again to Execute'));
+                            return;
+                        }
+                        const msg = (xhr && xhr.responseJSON && xhr.responseJSON.message) || tr('app.actionPlan.confirmFailed', 'Failed to execute actions.');
+                        $chat.append(`<div class="chat-message ai-message"><div class="message-content"><span class="text-danger">${escapeHtml(msg)}</span></div></div>`);
+                        $btn.prop('disabled', false).text(tr('app.actionPlan.confirmBtn', 'Confirm and Execute'));
+                    }
+                });
+            }
+
             function sendMessage() {
                 const $sendBtn = $('#chat-send-btn');
                 const $cancelBtn = $('#chat-cancel-btn');
@@ -1569,6 +1644,9 @@
                             const escaped = escapeHtml(resp.result || '').replace(/\n/g, '<br>');
                             $('#temp-ai-message .message-content').html(escaped);
                             $('#temp-ai-message').removeAttr('id');
+                            if (resp.needs_confirmation && resp.pending_actions) {
+                                renderPendingActionsCard(resp.pending_actions);
+                            }
                             renderWorkflowAndLogs(resp.logs || [], resp.workflow_events || []);
                             loadConversations();
                             loadMethodologies();
@@ -1682,6 +1760,9 @@
                 });
             });
             $('#chat-send-btn').click(sendMessage);
+            $('#chat .chat-area').on('click', '.confirm-action-btn', function() {
+                confirmPendingActions();
+            });
             $('#chat .input-group input').on('keypress', function(e) {
                 if (e.which === 13) {
                     e.preventDefault();

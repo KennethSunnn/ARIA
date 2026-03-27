@@ -15,6 +15,15 @@ class TaskCancelledError(Exception):
 
 
 class ARIAManager:
+    ALLOWED_ACTION_TYPES = {
+        "kb_delete_all",
+        "kb_delete_by_keyword",
+        "kb_delete_low_quality",
+        "conversation_archive",
+        "conversation_new",
+    }
+    HIGH_RISK_ACTION_TYPES = {"kb_delete_all"}
+
     def __init__(self, api_key: Optional[str] = None):
         self.model_pool = MODEL_POOL
         self.agent_templates = AGENT_TEMPLATES
@@ -53,6 +62,13 @@ class ARIAManager:
                 "董恺", "孟川", "祁峰", "易然", "池恒", "裴青", "邢岳", "鲍骁", "洪毅", "汪言",
                 "贾睿", "范哲", "樊涛", "邹赫", "石航", "雷靖", "龙湛", "万川", "段驰", "侯野",
             ],
+        }
+        self.action_registry = {
+            "kb_delete_all": self._exec_kb_delete_all,
+            "kb_delete_by_keyword": self._exec_kb_delete_by_keyword,
+            "kb_delete_low_quality": self._exec_kb_delete_low_quality,
+            "conversation_new": self._exec_conversation_new,
+            "conversation_archive": self._exec_conversation_archive,
         }
 
     def set_api_key(self, api_key: Optional[str]) -> None:
@@ -371,6 +387,167 @@ class ARIAManager:
         if any(k in lowered for k in greeting_keywords) and len(compact) <= 16:
             return {"mode": "small_talk", "reason": "greeting_fallback", "source": "heuristic", "confidence": 0.9}
         return {"mode": "task", "reason": "task_fallback", "source": "heuristic", "confidence": 0.7}
+
+    def derive_action_risk(self, action_type: str, risk: str) -> str:
+        normalized = (risk or "").strip().lower()
+        if normalized not in ("low", "medium", "high"):
+            normalized = "medium"
+        if action_type in self.HIGH_RISK_ACTION_TYPES:
+            return "high"
+        return normalized
+
+    def normalize_action_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+        mode = str(plan.get("mode") or "").strip().lower()
+        if mode not in ("action", "qa", "small_talk"):
+            mode = "qa"
+        actions = plan.get("actions")
+        if not isinstance(actions, list):
+            actions = []
+        normalized_actions = []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            action_type = str(action.get("type") or "").strip()
+            if not action_type or action_type not in self.ALLOWED_ACTION_TYPES:
+                continue
+            normalized_actions.append(
+                {
+                    "type": action_type,
+                    "target": str(action.get("target") or "").strip(),
+                    "filters": action.get("filters") if isinstance(action.get("filters"), dict) else {},
+                    "params": action.get("params") if isinstance(action.get("params"), dict) else {},
+                    "risk": self.derive_action_risk(action_type, str(action.get("risk") or "medium")),
+                    "reason": str(action.get("reason") or "").strip(),
+                }
+            )
+        return {
+            "mode": mode,
+            "summary": str(plan.get("summary") or "").strip(),
+            "requires_confirmation": True,
+            "actions": normalized_actions,
+            "requires_double_confirmation": self.requires_double_confirmation(normalized_actions),
+        }
+
+    def plan_actions(self, user_input: str) -> dict[str, Any]:
+        text = (user_input or "").strip()
+        if not text:
+            return {"mode": "small_talk", "summary": "empty_input", "requires_confirmation": True, "actions": []}
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是ARIA动作规划器。请把用户输入解析为：small_talk / qa / action。"
+                    "如果是action，输出可执行动作列表。禁止编造执行结果。"
+                    "仅输出JSON："
+                    "{\"mode\":\"small_talk|qa|action\","
+                    "\"summary\":\"...\","
+                    "\"actions\":[{\"type\":\"...\",\"target\":\"...\",\"filters\":{},\"params\":{},\"risk\":\"low|medium|high\",\"reason\":\"...\"}]}"
+                    "可用动作类型示例：kb_delete_all,kb_delete_by_keyword,kb_delete_low_quality,conversation_archive,conversation_new。"
+                ),
+            },
+            {"role": "user", "content": text},
+        ]
+        llm_text = self._call_llm(messages, fallback_text="")
+        llm_plan = self._extract_json_object(llm_text)
+        plan = self.normalize_action_plan(llm_plan) if llm_plan else {}
+        if plan and (plan.get("mode") != "qa" or plan.get("actions")):
+            return plan
+
+        lowered = text.lower()
+        if any(k in lowered for k in ["清理", "清空", "删除", "移除"]) and any(k in text for k in ["知识库", "方法论", "经验"]):
+            action_type = "kb_delete_low_quality"
+            if "清空" in text:
+                action_type = "kb_delete_all"
+            actions = [{
+                "type": action_type,
+                "target": "knowledge_base",
+                "filters": {},
+                "params": {},
+                "risk": self.derive_action_risk(action_type, "medium"),
+                "reason": "用户请求清理知识库",
+            }]
+            return {
+                "mode": "action",
+                "summary": "识别为知识库清理操作",
+                "requires_confirmation": True,
+                "actions": actions,
+                "requires_double_confirmation": self.requires_double_confirmation(actions),
+            }
+        return {"mode": "qa", "summary": "未识别为可执行动作", "requires_confirmation": True, "actions": []}
+
+    def format_action_plan_for_user(self, plan: dict[str, Any]) -> str:
+        actions = plan.get("actions") or []
+        if not actions:
+            return "我理解了你的请求，但当前未识别出可执行动作。请再具体一点，比如“删除关键词为xx的方法论”。"
+        lines = ["我已理解为可执行操作，执行前请确认："]
+        for idx, action in enumerate(actions, start=1):
+            lines.append(
+                f"{idx}. type={action.get('type')} target={action.get('target')} risk={action.get('risk')} reason={action.get('reason')}"
+            )
+        if self.requires_double_confirmation(actions):
+            lines.append("检测到高风险动作：需要二次确认。先回复“确认执行”，再回复“二次确认”后才会实际执行。")
+        else:
+            lines.append("请回复“确认执行”后我再实际执行。")
+        return "\n".join(lines)
+
+    def requires_double_confirmation(self, actions: list[dict[str, Any]]) -> bool:
+        return any((a.get("risk") or "medium") == "high" for a in (actions or []))
+
+    def execute_actions(
+        self,
+        actions: list[dict[str, Any]],
+        conversation_id: str,
+        request_id: str,
+        methodology_manager: Any,
+        conversation_manager: Any,
+    ) -> dict[str, Any]:
+        report = []
+        for action in actions or []:
+            action_type = action.get("type", "")
+            handler = self.action_registry.get(action_type)
+            if not handler:
+                report.append({"action": action_type, "result": {"success": False, "message": "unsupported_action"}})
+                continue
+            try:
+                result = handler(action, conversation_id, methodology_manager, conversation_manager)
+                report.append({"action": action_type, "result": result})
+            except Exception as e:
+                report.append({"action": action_type, "result": {"success": False, "message": str(e)}})
+        success_count = sum(1 for r in report if r.get("result", {}).get("success") is not False)
+        return {"success_count": success_count, "total": len(report), "report": report}
+
+    def _exec_kb_delete_all(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        all_methods = methodology_manager.get_all_methodologies() or []
+        ids = [m.get("method_id") for m in all_methods if m.get("method_id")]
+        return methodology_manager.delete_methodologies_batch(ids)
+
+    def _exec_kb_delete_by_keyword(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        kw = str((action.get("filters") or {}).get("keyword") or "").strip()
+        candidates = methodology_manager.search_methodologies(kw) if kw else []
+        ids = [m.get("method_id") for m in candidates if m.get("method_id")]
+        result = methodology_manager.delete_methodologies_batch(ids)
+        result["keyword"] = kw
+        return result
+
+    def _exec_kb_delete_low_quality(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        all_methods = methodology_manager.get_all_methodologies() or []
+        ids = [
+            m.get("method_id")
+            for m in all_methods
+            if m.get("method_id") and int(m.get("success_count", 0)) <= 0 and int(m.get("usage_count", 0)) <= 0
+        ]
+        return methodology_manager.delete_methodologies_batch(ids)
+
+    def _exec_conversation_new(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        title = str((action.get("params") or {}).get("title") or "新会话")
+        conv = conversation_manager.create_conversation(title)
+        return {"success": True, "conversation_id": conv.get("conversation_id")}
+
+    def _exec_conversation_archive(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        conv_id = str((action.get("params") or {}).get("conversation_id") or conversation_id or "").strip()
+        ok = conversation_manager.set_archived(conv_id, True) if conv_id else False
+        return {"success": bool(ok), "conversation_id": conv_id}
 
     def generate_small_talk_reply(self, user_input: str) -> str:
         text = (user_input or "").strip()

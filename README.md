@@ -66,6 +66,28 @@ Then open:
 - `static/js/i18n.js`: i18n runtime.
 - `static/locales/en.json`, `static/locales/zh.json`: locale dictionaries.
 
+## Action Confirmation Flow
+
+- All executable operations are planned first, then require confirmation before execution.
+- Low/medium-risk actions require one confirmation.
+- High-risk actions (for example full knowledge-base deletion) require double confirmation.
+- The web UI provides confirmation buttons; API clients can call `POST /api/confirm_actions`.
+
+## Acceptance Checks
+
+Use these prompts in the app to verify the full loop:
+
+1. Enter a low-risk intent (example: "clean low-quality methods in knowledge base").
+2. Confirm the generated plan once and verify an execution summary appears.
+3. Enter a high-risk intent (example: "clear all methods in knowledge base").
+4. Confirm once and verify the app asks for a second confirmation.
+5. Confirm again and verify execution completes and logs are updated.
+
+Expected behavior:
+- No operation runs before confirmation.
+- Unsupported action types are filtered out by allowlist.
+- High-risk actions cannot execute without second confirmation.
+
 ## Troubleshooting
 
 - If launcher opens but app is blank, open `http://127.0.0.1:5000/app` directly.

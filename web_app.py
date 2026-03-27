@@ -26,6 +26,7 @@ methodology_manager = MethodologyLibrary()
 conversation_manager = ConversationLibrary()
 sse_subscribers: dict[str, list[queue.Queue]] = {}
 sse_lock = threading.Lock()
+pending_action_plans: dict[str, dict] = {}
 
 
 def publish_workflow_event(event: dict):
@@ -45,6 +46,60 @@ manager.set_event_sink(publish_workflow_event)
 
 # 大模型 API：仅从环境变量 / .env 读取（不在 Web 中保存密钥，便于开源部署）
 API_KEY = os.getenv('VOLCANO_API_KEY', '') or os.getenv('ARK_API_KEY', '')
+
+
+def _is_confirmation_text(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    keywords = [
+        "确认执行", "确认", "继续执行", "执行吧", "同意执行",
+        "confirm", "yes execute", "execute now", "go ahead"
+    ]
+    return any(k in t for k in keywords)
+
+
+def _is_double_confirmation_text(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    keywords = [
+        "二次确认", "再次确认", "高风险确认", "最终确认",
+        "double confirm", "second confirm", "final confirm",
+    ]
+    return any(k in t for k in keywords)
+
+
+def _finalize_action_execution(conversation_id: str, request_id: str, actions: list[dict]):
+    exec_result = manager.execute_actions(
+        actions or [],
+        conversation_id,
+        request_id or "",
+        methodology_manager,
+        conversation_manager,
+    )
+    summary = f"已执行 {exec_result.get('total', 0)} 个动作，成功 {exec_result.get('success_count', 0)} 个。"
+    manager.push_event("action_execute", "success", "TaskParser", summary, {"report": exec_result.get("report", [])})
+    manager.push_log("TaskParser", summary, "completed")
+    logs = manager.get_execution_log()
+    workflow_events = manager.get_workflow_events()
+    conversation_manager.append_message(
+        conversation_id,
+        "assistant",
+        summary,
+        {"logs": logs, "workflow_events": workflow_events, "execution_report": exec_result},
+    )
+    conversation_manager.replace_workflow_events(conversation_id, workflow_events)
+    return {
+        'result': summary,
+        'logs': logs,
+        'workflow_events': workflow_events,
+        'conversation_id': conversation_id,
+        'api_key_configured': True,
+        'task_id': manager.current_task_id,
+        'request_id': request_id or "",
+        'executed_actions': exec_result,
+    }
 
 
 @app.route('/api/check_api_key')
@@ -136,6 +191,79 @@ def process_input():
         manager.clear_execution_log()
         manager.clear_workflow_events()
         conversation_manager.append_message(conversation_id, "user", user_input or "")
+
+        # 通用自治：先尝试动作规划（所有动作都需要确认）
+        if conversation_id in pending_action_plans:
+            pending = pending_action_plans.get(conversation_id, {})
+            actions = pending.get("actions") or []
+            if _is_confirmation_text(user_input or ""):
+                if manager.requires_double_confirmation(actions):
+                    pending["double_confirm_ready"] = True
+                    pending_action_plans[conversation_id] = pending
+                    msg = "检测到高风险动作。请回复“二次确认”后执行。"
+                    manager.push_event("action_double_confirm_required", "warning", "TaskParser", msg)
+                    manager.push_log("TaskParser", msg, "warning")
+                    logs = manager.get_execution_log()
+                    workflow_events = manager.get_workflow_events()
+                    conversation_manager.append_message(
+                        conversation_id,
+                        "assistant",
+                        msg,
+                        {"logs": logs, "workflow_events": workflow_events, "pending_actions": {"actions": actions, "requires_double_confirmation": True}},
+                    )
+                    conversation_manager.replace_workflow_events(conversation_id, workflow_events)
+                    return jsonify({
+                        'result': msg,
+                        'logs': logs,
+                        'workflow_events': workflow_events,
+                        'conversation_id': conversation_id,
+                        'api_key_configured': True,
+                        'task_id': manager.current_task_id,
+                        'request_id': request_id or "",
+                        'pending_actions': {"actions": actions, "requires_double_confirmation": True},
+                        'needs_confirmation': True,
+                        'needs_double_confirmation': True,
+                    })
+                pending_action_plans.pop(conversation_id, None)
+                return jsonify(_finalize_action_execution(conversation_id, request_id or "", actions))
+
+            if _is_double_confirmation_text(user_input or "") and pending.get("double_confirm_ready"):
+                pending_action_plans.pop(conversation_id, None)
+                return jsonify(_finalize_action_execution(conversation_id, request_id or "", actions))
+
+        plan = manager.plan_actions(user_input or "")
+        if plan.get("mode") == "action" and plan.get("actions"):
+            plan["requires_double_confirmation"] = manager.requires_double_confirmation(plan.get("actions") or [])
+            pending_action_plans[conversation_id] = {
+                "actions": plan.get("actions"),
+                "summary": plan.get("summary", ""),
+                "created_at": time.time(),
+                "double_confirm_ready": False,
+            }
+            preview_text = manager.format_action_plan_for_user(plan)
+            manager.push_event("action_plan", "success", "TaskParser", "已生成执行计划，等待确认", {"plan": plan})
+            manager.push_log("TaskParser", "已生成执行计划，等待确认", "warning")
+            logs = manager.get_execution_log()
+            workflow_events = manager.get_workflow_events()
+            conversation_manager.append_message(
+                conversation_id,
+                "assistant",
+                preview_text,
+                {"logs": logs, "workflow_events": workflow_events, "pending_actions": plan},
+            )
+            conversation_manager.replace_workflow_events(conversation_id, workflow_events)
+            return jsonify({
+                'result': preview_text,
+                'logs': logs,
+                'workflow_events': workflow_events,
+                'conversation_id': conversation_id,
+                'api_key_configured': True,
+                'task_id': manager.current_task_id,
+                'request_id': request_id or "",
+                'pending_actions': plan,
+                'needs_confirmation': True,
+                'needs_double_confirmation': bool(plan.get("requires_double_confirmation")),
+            })
 
         # 轻量问候直达：寒暄类输入跳过多Agent重流程，避免响应慢且冗长
         route = manager.classify_interaction_mode(user_input or "")
@@ -266,6 +394,35 @@ def process_input():
         manager.current_task_id = ""
         manager.current_request_id = ""
         manager.clear_cancel(request_id)
+
+
+@app.route('/api/confirm_actions', methods=['POST'])
+def confirm_actions():
+    data = request.json or {}
+    conversation_id = (data.get('conversation_id') or '').strip()
+    request_id = (data.get('request_id') or '').strip()
+    if not conversation_id:
+        return jsonify({'success': False, 'message': '缺少 conversation_id'}), 400
+    pending = pending_action_plans.get(conversation_id)
+    if not pending:
+        return jsonify({'success': False, 'message': '当前没有待确认动作'}), 404
+
+    force = bool(data.get('force'))
+    actions = pending.get("actions") or []
+    if manager.requires_double_confirmation(actions) and not force:
+        pending["double_confirm_ready"] = True
+        pending_action_plans[conversation_id] = pending
+        return jsonify({
+            'success': False,
+            'message': '检测到高风险动作，请二次确认后执行',
+            'requires_double_confirmation': True,
+            'pending_actions': {"actions": actions, "requires_double_confirmation": True},
+        }), 409
+
+    pending_action_plans.pop(conversation_id, None)
+    payload = _finalize_action_execution(conversation_id, request_id, actions)
+    payload['success'] = True
+    return jsonify(payload)
 
 
 @app.route('/api/cancel_task', methods=['POST'])
