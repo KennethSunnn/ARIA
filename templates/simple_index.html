@@ -551,6 +551,9 @@
                             <div class="d-flex justify-content-between align-items-center">
                                 <h5 id="chat-panel-title" class="card-title mb-0 panel-title" data-i18n="app.panel.chat">Chat</h5>
                                 <div class="d-flex align-items-center gap-2 panel-controls">
+                                    <button class="btn btn-outline-primary btn-sm" id="chat-new-task-btn" type="button" title="Start a new task thread in this session">
+                                        <i class="fa fa-plus"></i> <span data-i18n="app.chat.newTask">New task</span>
+                                    </button>
                                     <button class="btn btn-outline-secondary btn-sm" id="chat-clear-btn">
                                         <i class="fa fa-trash"></i> <span data-i18n="common.clear">Clear</span>
                                     </button>
@@ -572,6 +575,12 @@
                             </div>
                         </div>
                         <div class="card-footer">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="aria-action-screenshots" autocomplete="off">
+                                <label class="form-check-label text-muted" for="aria-action-screenshots" style="font-size:13px;" data-i18n="app.chat.actionScreenshots">
+                                    After browser/desktop actions, save a full-screen screenshot
+                                </label>
+                            </div>
                             <div class="input-group">
                                 <input type="text" class="form-control" data-i18n="app.input.chat" data-i18n-attr="placeholder" placeholder="Type your question...">
                                 <button class="btn btn-primary" id="chat-send-btn">
@@ -713,7 +722,7 @@
                 <div class="card-body">
                     <div class="mb-4">
                         <h6 class="font-weight-bold mb-3" data-i18n="app.settings.apiTitle">Model API (environment variable)</h6>
-                        <p class="text-muted small mb-2" data-i18n="app.settings.apiDesc">For security and open-source collaboration, keys are not stored in web UI. Copy .env.example to .env, set VOLCANO_API_KEY (or ARK_API_KEY), and restart python web_app.py.</p>
+                        <p class="text-muted small mb-2" data-i18n="app.settings.apiDesc">For security and open-source collaboration, keys are not stored in web UI. Copy .env.example to .env, set DASHSCOPE_API_KEY, and restart python web_app.py.</p>
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="refresh-api-key-status-btn">
                             <i class="fa fa-refresh mr-1"></i><span data-i18n="common.refresh">Refresh</span>
                         </button>
@@ -736,6 +745,24 @@
             await window.ariaI18n.init();
             const tr = (k, fb = '') => (window.ariaI18n ? window.ariaI18n.t(k, fb) : (fb || k));
             const tf = (k, vars = {}, fb = '') => (window.ariaI18n ? window.ariaI18n.format(tr(k, fb), vars) : (fb || k));
+            function formatTokenUsageLine(tu) {
+                if (!tu) return '';
+                const p = Number(tu.prompt_tokens) || 0;
+                const c = Number(tu.completion_tokens) || 0;
+                const t = Number(tu.total_tokens) || 0;
+                const n = Number(tu.llm_calls) || 0;
+                if (!t && !p && !c && !n) return '';
+                const total = t || (p + c);
+                return tf('app.tokenUsage.line', { prompt: p, completion: c, total: total, calls: n },
+                    `Token: prompt ${p}, completion ${c}, total ${total}, ${n} LLM call(s)`);
+            }
+            function appendTokenUsageToAiMessage($msgEl, tu) {
+                if (!$msgEl || !$msgEl.length) return;
+                const line = formatTokenUsageLine(tu);
+                if (!line) return;
+                $msgEl.find('.token-usage-note').remove();
+                $msgEl.append(`<div class="token-usage-note text-muted mt-1" style="font-size:12px;">${escapeHtml(line)}</div>`);
+            }
             let currentConversationId = null;
             let workflowPollTimer = null;
             let workflowEventSource = null;
@@ -744,9 +771,20 @@
             let workflowEventIds = new Set();
             let selectedMethodologyIds = new Set();
             let currentTaskId = null;
+            /** 下一则用户消息携带 new_task: true（一次后由 sendMessage 清零） */
+            let nextSendAsNewTask = false;
             let pendingWorkflowEvents = [];
             let currentRequestId = null;
+            let currentExecutionSessionId = null;
+            let executionStatusTimer = null;
             let isTaskRunning = false;
+            let lastExecReportKey = '';
+            /** 已结束（completed/aborted/manual_takeover）的 execution session，避免 loadConversationDetail 再次 startExecutionStatusPolling 造成 status↔conversation 死循环 */
+            let lastTerminalExecutionSessionId = null;
+            /** 异步动作执行结束时 status 接口带回的 token 用量，在 loadConversationDetail 重绘协作区后写入底部说明 */
+            let lastCompletedExecutionTokenUsage = null;
+            let loadConversationsTimer = null;
+            let workflowStreamScheduleTimer = null;
             let autoFocusLatestNode = true;
             let isStoryFullscreen = false;
             let isStoryCollapsed = true;
@@ -1156,9 +1194,15 @@
                             </div>
                         `);
                     } else {
+                        const meta = msg.meta || {};
+                        const _tuLine = formatTokenUsageLine(meta.token_usage);
+                        const foot = _tuLine
+                            ? `<div class="token-usage-note text-muted mt-1" style="font-size:12px;">${escapeHtml(_tuLine)}</div>`
+                            : '';
                         $chat.append(`
                             <div class="chat-message ai-message">
                                 <div class="message-content">${escapeHtml(msg.content || '').replace(/\n/g, '<br>')}</div>
+                                ${foot}
                             </div>
                         `);
                     }
@@ -1172,6 +1216,7 @@
                 workflowEventIds = new Set((currentWorkflowEvents || []).map(e => e.event_id).filter(Boolean));
                 const $area = $('#execution-log-area');
                 $area.empty();
+                renderExecutionControlPanel();
                 const events = currentWorkflowEvents || [];
                 const rawLogs = currentLogs || [];
                 if (!events.length && !rawLogs.length) {
@@ -1221,8 +1266,10 @@
                 $area.scrollTop($area.prop('scrollHeight'));
             }
 
-            function loadWorkflowEvents() {
+            function loadWorkflowEvents(forceSnapshot) {
                 if (!currentConversationId) return;
+                // 长请求 process_input 进行中勿轮询全量重绘，避免协作区空/旧数据来回闪跳
+                if (isTaskRunning && !forceSnapshot) return;
                 $.ajax({
                     url: '/api/workflow_events',
                     type: 'GET',
@@ -1243,9 +1290,10 @@
                 });
             }
 
-            function startWorkflowPolling() {
+            function startWorkflowPolling(intervalMs) {
                 if (workflowPollTimer) clearInterval(workflowPollTimer);
-                workflowPollTimer = setInterval(loadWorkflowEvents, 800);
+                const ms = typeof intervalMs === 'number' && intervalMs > 0 ? intervalMs : 800;
+                workflowPollTimer = setInterval(function() { loadWorkflowEvents(false); }, ms);
             }
 
             function stopWorkflowPolling() {
@@ -1254,6 +1302,10 @@
             }
 
             function stopWorkflowStream() {
+                if (workflowStreamScheduleTimer) {
+                    clearTimeout(workflowStreamScheduleTimer);
+                    workflowStreamScheduleTimer = null;
+                }
                 if (workflowEventSource) {
                     workflowEventSource.close();
                     workflowEventSource = null;
@@ -1261,55 +1313,78 @@
                 stopWorkflowPolling();
             }
 
-            function startWorkflowStream() {
-                stopWorkflowStream();
-                if (!currentConversationId) return;
-
-                // 先拉一次快照，避免连接建立前为空
-                loadWorkflowEvents();
-
-                try {
-                    workflowEventSource = new EventSource(`/api/workflow_stream?conversation_id=${encodeURIComponent(currentConversationId)}`);
-                    workflowEventSource.onmessage = function(evt) {
-                        try {
-                            const payload = JSON.parse(evt.data || '{}');
-                            if (payload.type === 'keepalive' || payload.type === 'connected') {
+            /**
+             * @param {boolean} immediate 为 true 时立即连 SSE（新建会话等）；否则短防抖，合并同一时刻多次触发
+             * @param {boolean} skipInitialWorkflowFetch 为 true 时跳过 loadWorkflowEvents（loadConversationDetail 已渲染过协作区，避免重复 GET）
+             */
+            function startWorkflowStream(immediate, skipInitialWorkflowFetch) {
+                function connectStream() {
+                    workflowStreamScheduleTimer = null;
+                    const cid = currentConversationId;
+                    if (!cid) return;
+                    stopWorkflowStream();
+                    if (!skipInitialWorkflowFetch) {
+                        loadWorkflowEvents(true);
+                    }
+                    try {
+                        workflowEventSource = new EventSource(`/api/workflow_stream?conversation_id=${encodeURIComponent(cid)}`);
+                        workflowEventSource.onmessage = function(evt) {
+                            try {
+                                const payload = JSON.parse(evt.data || '{}');
+                                if (payload.type === 'keepalive' || payload.type === 'connected') {
+                                    return;
+                                }
+                                // 仅展示当前 request_id 对应的协作日志
+                                if (payload.request_id) {
+                                    if (!currentRequestId) return;
+                                    if (payload.request_id !== currentRequestId) return;
+                                } else {
+                                    // 若当前在执行新任务且后端未返回 request_id，则很可能是旧事件，直接忽略
+                                    if (currentRequestId) return;
+                                }
+                                // 增量追加：只处理当前会话未见过的事件
+                                if (payload.conversation_id && payload.conversation_id !== currentConversationId) {
+                                    return;
+                                }
+                                if (payload.event_id && workflowEventIds.has(payload.event_id)) {
+                                    return;
+                                }
+                                if (payload.event_id) {
+                                    workflowEventIds.add(payload.event_id);
+                                }
+                                currentWorkflowEvents.push(payload);
+                                appendWorkflowEventToDom(payload);
                                 return;
+                            } catch (e) {}
+                            // JSON 解析失败再回退全量刷新（任务进行中勿刷，避免与长请求打架）
+                            if (!isTaskRunning) {
+                                loadWorkflowEvents(false);
                             }
-                            // 仅展示当前 request_id 对应的协作日志
-                            if (payload.request_id) {
-                                if (!currentRequestId) return;
-                                if (payload.request_id !== currentRequestId) return;
-                            } else {
-                                // 若当前在执行新任务且后端未返回 request_id，则很可能是旧事件，直接忽略
-                                if (currentRequestId) return;
+                        };
+                        workflowEventSource.onerror = function() {
+                            // SSE 断线时降级为轮询；任务进行中不启轮询；首次用较低频降低闪烁
+                            if (isTaskRunning) return;
+                            if (!workflowPollTimer) {
+                                startWorkflowPolling(2000);
                             }
-                            // 增量追加：只处理当前会话未见过的事件
-                            if (payload.conversation_id && payload.conversation_id !== currentConversationId) {
-                                return;
-                            }
-                            if (payload.event_id && workflowEventIds.has(payload.event_id)) {
-                                return;
-                            }
-                            if (payload.event_id) {
-                                workflowEventIds.add(payload.event_id);
-                            }
-                            currentWorkflowEvents.push(payload);
-                            appendWorkflowEventToDom(payload);
-                            return;
-                        } catch (e) {}
-                        // JSON 解析失败再回退全量刷新
-                        loadWorkflowEvents();
-                    };
-                    workflowEventSource.onerror = function() {
-                        // SSE 断线时降级为轮询，保证可用性
-                        if (!workflowPollTimer) {
-                            startWorkflowPolling();
+                        };
+                    } catch (e) {
+                        if (!isTaskRunning) {
+                            startWorkflowPolling(2000);
                         }
-                    };
-                } catch (e) {
-                    startWorkflowPolling();
+                    }
                 }
+
+                if (immediate === true) {
+                    if (workflowStreamScheduleTimer) {
+                        clearTimeout(workflowStreamScheduleTimer);
+                        workflowStreamScheduleTimer = null;
+                    }
+                    connectStream();
+                    return;
+                }
+                if (workflowStreamScheduleTimer) clearTimeout(workflowStreamScheduleTimer);
+                workflowStreamScheduleTimer = setTimeout(connectStream, 100);
             }
 
             function renderConversationList(list) {
@@ -1336,22 +1411,36 @@
                 });
             }
 
-            function loadConversations() {
-                $.ajax({
-                    url: '/api/conversations',
-                    type: 'GET',
-                    success: function(resp) {
-                        const list = resp.conversations || [];
-                        renderConversationList(list);
-                        if (!list.length && !currentConversationId) {
-                            createConversation(tr('app.session.newDefault', 'New Session'));
-                            return;
+            /** @param {boolean} immediate 首次加载/切语言等需立即拉列表；其余调用合并防抖，减轻同一时刻多次 GET /api/conversations */
+            function loadConversations(immediate) {
+                function runAjax() {
+                    loadConversationsTimer = null;
+                    $.ajax({
+                        url: '/api/conversations',
+                        type: 'GET',
+                        success: function(resp) {
+                            const list = resp.conversations || [];
+                            renderConversationList(list);
+                            if (!list.length && !currentConversationId) {
+                                createConversation(tr('app.session.newDefault', 'New Session'));
+                                return;
+                            }
+                            if (!currentConversationId && list.length) {
+                                loadConversationDetail(list[0].conversation_id);
+                            }
                         }
-                        if (!currentConversationId && list.length) {
-                            loadConversationDetail(list[0].conversation_id);
-                        }
+                    });
+                }
+                if (immediate === true) {
+                    if (loadConversationsTimer) {
+                        clearTimeout(loadConversationsTimer);
+                        loadConversationsTimer = null;
                     }
-                });
+                    runAjax();
+                    return;
+                }
+                if (loadConversationsTimer) clearTimeout(loadConversationsTimer);
+                loadConversationsTimer = setTimeout(runAjax, 140);
             }
 
             function loadConversationDetail(conversationId) {
@@ -1364,13 +1453,38 @@
                         $('#chat-panel-title').text(tr('app.panel.chat', 'Chat'));
                         renderConversationMessages(conv.messages || []);
                         const messages = conv.messages || [];
+                        let restoredTaskId = null;
+                        for (let i = messages.length - 1; i >= 0; i--) {
+                            const m = messages[i];
+                            if (m && m.role === 'assistant' && m.meta && m.meta.task_id) {
+                                restoredTaskId = m.meta.task_id;
+                                break;
+                            }
+                        }
+                        currentTaskId = restoredTaskId || null;
+                        nextSendAsNewTask = false;
                         const lastMeta = messages.length ? (messages[messages.length - 1].meta || {}) : {};
+                        currentExecutionSessionId = lastMeta.execution_session_id || currentExecutionSessionId;
                         if (lastMeta.pending_actions && (lastMeta.pending_actions.actions || []).length) {
                             renderPendingActionsCard(lastMeta.pending_actions);
                         }
                         renderWorkflowAndLogs(lastMeta.logs || [], conv.workflow_events || []);
+                        if (lastCompletedExecutionTokenUsage) {
+                            const tuExec = lastCompletedExecutionTokenUsage;
+                            lastCompletedExecutionTokenUsage = null;
+                            const execLine = formatTokenUsageLine(tuExec);
+                            if (execLine) {
+                                $('#execution-log-area .exec-token-usage-footer').remove();
+                                $('#execution-log-area').append(
+                                    `<div class="exec-token-usage-footer text-xs text-muted border-top pt-2 mt-2">${escapeHtml(execLine)}</div>`
+                                );
+                            }
+                        }
+                        if (currentExecutionSessionId && currentExecutionSessionId !== lastTerminalExecutionSessionId) {
+                            startExecutionStatusPolling();
+                        }
                         loadConversations();
-                        startWorkflowStream();
+                        startWorkflowStream(false, true);
                     }
                 });
             }
@@ -1385,10 +1499,12 @@
                         const conv = resp.conversation || {};
                         if (!conv.conversation_id) return;
                         currentConversationId = conv.conversation_id;
+                        currentTaskId = null;
+                        nextSendAsNewTask = false;
                         renderConversationMessages([]);
                         renderWorkflowAndLogs([], []);
                         loadConversations();
-                        startWorkflowStream();
+                        startWorkflowStream(true, false);
                     }
                 });
             }
@@ -1520,7 +1636,7 @@
                         if (has) {
                             $('#api-key-status').html(`<span class="text-success"><i class="fa fa-check-circle mr-1"></i> ${tr('app.settings.apiReady', 'API key environment variable detected.')}</span>`);
                         } else {
-                            $('#api-key-status').html(`<span class="text-warning"><i class="fa fa-exclamation-circle mr-1"></i> ${tr('app.settings.apiMissing', 'VOLCANO_API_KEY is missing. Simulation mode will be used.')}</span>`);
+                            $('#api-key-status').html(`<span class="text-warning"><i class="fa fa-exclamation-circle mr-1"></i> ${tr('app.settings.apiMissing', 'DASHSCOPE_API_KEY is missing. Simulation mode will be used.')}</span>`);
                         }
                     },
                     error: function() {
@@ -1565,6 +1681,7 @@
                             <div class="text-muted mb-2">${summary}</div>
                             ${planHtml}
                             ${needDouble ? `<div class="text-warning mb-2">${tr('app.actionPlan.highRiskHint', 'High-risk actions require a second confirmation.')}</div>` : ''}
+                            <div class="alert alert-secondary py-2 px-3 mb-2" style="font-size:13px;">${tr('app.actionPlan.mustClick', 'You must click the confirm button below to run commands.')}</div>
                             <div class="d-flex align-items-center" style="gap:8px;">
                                 <button class="btn btn-sm btn-primary confirm-action-btn" type="button">${tr('app.actionPlan.confirmBtn', 'Confirm and Execute')}</button>
                                 <span class="text-muted">${tr('app.actionPlan.confirmHint', 'No action will run before confirmation.')}</span>
@@ -1587,10 +1704,17 @@
                     url: '/api/confirm_actions',
                     type: 'POST',
                     contentType: 'application/json',
-                    data: JSON.stringify({ conversation_id: currentConversationId, request_id: currentRequestId || '', force }),
+                    data: JSON.stringify({
+                        conversation_id: currentConversationId,
+                        request_id: currentRequestId || '',
+                        force,
+                        action_screenshots: isActionScreenshotsEnabled(),
+                    }),
                     success: function(resp) {
                         const text = escapeHtml(resp.result || tr('app.actionPlan.executed', 'Actions executed.')).replace(/\n/g, '<br>');
                         $chat.append(`<div class="chat-message ai-message"><div class="message-content">${text}</div></div>`);
+                        currentExecutionSessionId = resp.execution_session_id || currentExecutionSessionId;
+                        if (currentExecutionSessionId) startExecutionStatusPolling();
                         renderWorkflowAndLogs(resp.logs || [], resp.workflow_events || []);
                         loadConversations();
                         loadMethodologies();
@@ -1609,12 +1733,118 @@
                 });
             }
 
+            function renderExecutionControlPanel() {
+                const $area = $('#execution-log-area');
+                const sid = currentExecutionSessionId || '';
+                const disabled = sid ? '' : 'disabled';
+                const sidText = sid ? escapeHtml(sid) : tr('app.exec.none', 'None');
+                const panel = `
+                    <div class="card mb-2">
+                        <div class="card-body py-2 px-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="text-muted" style="font-size:12px;">${tr('app.exec.title', 'Execution Control')}</div>
+                                <div class="text-muted" style="font-size:12px;">session: <code>${sidText}</code></div>
+                            </div>
+                            <div class="d-flex align-items-center" style="gap:8px;flex-wrap:wrap;">
+                                <button class="btn btn-outline-secondary btn-sm exec-pause-btn" type="button" ${disabled}>${tr('app.exec.pause', 'Pause')}</button>
+                                <button class="btn btn-outline-secondary btn-sm exec-resume-btn" type="button" ${disabled}>${tr('app.exec.resume', 'Resume')}</button>
+                                <button class="btn btn-outline-warning btn-sm exec-takeover-btn" type="button" ${disabled}>${tr('app.exec.takeover', 'Manual Takeover')}</button>
+                                <button class="btn btn-outline-danger btn-sm exec-abort-btn" type="button" ${disabled}>${tr('app.exec.abort', 'Abort')}</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                $area.prepend(panel);
+            }
+
+            function pollExecutionStatusOnce() {
+                if (!currentExecutionSessionId) return;
+                $.ajax({
+                    url: '/api/execution/status',
+                    type: 'GET',
+                    data: { session_id: currentExecutionSessionId, conversation_id: currentConversationId || '' },
+                    success: function(resp) {
+                        if (!resp || !resp.success) {
+                            stopExecutionStatusPolling();
+                            return;
+                        }
+                        const done = ['completed', 'aborted', 'manual_takeover'].includes(resp.status || '');
+                        const report = resp.report || [];
+                        if (report.length) {
+                            const key = JSON.stringify(report.map((r) => ({
+                                step_id: r.step_id,
+                                status: r.status,
+                                action: r.action,
+                                out: ((r.stdout || r.stderr || '') + '').slice(0, 200),
+                            })));
+                            if (key !== lastExecReportKey) {
+                                lastExecReportKey = key;
+                                const lines = report.map((r) => {
+                                    const s = escapeHtml(r.status || '');
+                                    const a = escapeHtml(r.action || '');
+                                    const out = escapeHtml((r.stdout || r.stderr || '').toString()).slice(0, 180);
+                                    return `<div class="text-xs text-muted">#${r.step_id || '-'} [${s}] ${a} ${out}</div>`;
+                                }).join('');
+                                $('#execution-log-area .exec-live-report').remove();
+                                $('#execution-log-area').prepend(`<div class="exec-live-report mb-2 p-2 border rounded">${lines}</div>`);
+                            }
+                        } else if (!done) {
+                            lastExecReportKey = '';
+                        }
+                        if (done) {
+                            lastExecReportKey = '';
+                            if (currentExecutionSessionId) {
+                                lastTerminalExecutionSessionId = currentExecutionSessionId;
+                            }
+                            stopExecutionStatusPolling();
+                            if (resp.token_usage) {
+                                lastCompletedExecutionTokenUsage = resp.token_usage;
+                            }
+                            loadConversationDetail(currentConversationId);
+                        }
+                    }
+                });
+            }
+
+            function startExecutionStatusPolling() {
+                stopExecutionStatusPolling();
+                executionStatusTimer = setInterval(pollExecutionStatusOnce, 1500);
+                pollExecutionStatusOnce();
+            }
+
+            function stopExecutionStatusPolling() {
+                if (executionStatusTimer) {
+                    clearInterval(executionStatusTimer);
+                    executionStatusTimer = null;
+                }
+                lastExecReportKey = '';
+            }
+
+            function callExecutionControl(action) {
+                if (!currentExecutionSessionId) return;
+                $.ajax({
+                    url: `/api/execution/${action}`,
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ session_id: currentExecutionSessionId }),
+                    success: function(resp) {
+                        const msg = escapeHtml((resp && resp.status) || action);
+                        $('#execution-log-area').prepend(`<div class="text-xs text-muted mb-1">control: ${msg}</div>`);
+                        if (action === 'abort' || action === 'takeover') {
+                            stopExecutionStatusPolling();
+                        }
+                    }
+                });
+            }
+
             function sendMessage() {
                 const $sendBtn = $('#chat-send-btn');
                 const $cancelBtn = $('#chat-cancel-btn');
                 const $input = $('#chat .input-group input');
                 const userInput = ($input.val() || '').trim();
                 if (!userInput) return;
+                const sendAsNewTask = nextSendAsNewTask;
+                nextSendAsNewTask = false;
                 // 为本次任务生成前端 request_id，协作日志/SSE 也会带同一个 request_id 供前端过滤
                 const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
                 currentRequestId = requestId;
@@ -1624,6 +1854,7 @@
                 $cancelBtn.show().prop('disabled', false);
                 $input.prop('disabled', true);
                 isTaskRunning = true;
+                stopWorkflowPolling();
                 // 开始新任务前清空当前任务态，避免 SSE/增量渲染把上一轮协作日志混进来
                 currentLogs = [];
                 currentWorkflowEvents = [];
@@ -1637,15 +1868,27 @@
                         url: '/api/process_input',
                         type: 'POST',
                         contentType: 'application/json',
-                        data: JSON.stringify({ user_input: userInput, conversation_id: convId, request_id: requestId }),
+                        data: JSON.stringify({
+                            user_input: userInput,
+                            conversation_id: convId,
+                            request_id: requestId,
+                            task_id: currentTaskId || '',
+                            new_task: !!sendAsNewTask,
+                            action_screenshots: isActionScreenshotsEnabled(),
+                        }),
                         success: function(resp) {
                             currentConversationId = resp.conversation_id || currentConversationId;
                             currentTaskId = resp.task_id || currentTaskId;
+                            currentExecutionSessionId = resp.execution_session_id || currentExecutionSessionId;
                             const escaped = escapeHtml(resp.result || '').replace(/\n/g, '<br>');
                             $('#temp-ai-message .message-content').html(escaped);
+                            appendTokenUsageToAiMessage($('#temp-ai-message'), resp.token_usage);
                             $('#temp-ai-message').removeAttr('id');
                             if (resp.needs_confirmation && resp.pending_actions) {
                                 renderPendingActionsCard(resp.pending_actions);
+                            }
+                            if (resp.execution_session_id) {
+                                startExecutionStatusPolling();
                             }
                             renderWorkflowAndLogs(resp.logs || [], resp.workflow_events || []);
                             loadConversations();
@@ -1660,6 +1903,9 @@
                             $cancelBtn.hide().prop('disabled', true);
                             $input.prop('disabled', false);
                             isTaskRunning = false;
+                            if (currentConversationId) {
+                                startWorkflowStream();
+                            }
                         }
                     });
                 }
@@ -1696,10 +1942,29 @@
             applyMethodFilterOptions();
             loadApiKeyStatus();
             loadMethodologies();
-            loadConversations();
+            loadConversations(true);
 
             // 事件绑定
+            (function initActionScreenshotsToggle() {
+                const $cb = $('#aria-action-screenshots');
+                try {
+                    $cb.prop('checked', localStorage.getItem('aria_action_screenshots') === '1');
+                } catch (e) { /* ignore */ }
+                $cb.on('change', function() {
+                    try {
+                        localStorage.setItem('aria_action_screenshots', this.checked ? '1' : '0');
+                    } catch (e) { /* ignore */ }
+                });
+            })();
+            function isActionScreenshotsEnabled() {
+                return $('#aria-action-screenshots').is(':checked');
+            }
+
             $('#new-conversation-btn').click(function() { createConversation(tr('app.session.newDefault', 'New Session')); });
+            $('#chat-new-task-btn').click(function() {
+                currentTaskId = null;
+                nextSendAsNewTask = true;
+            });
             $('#chat-clear-btn').click(function() {
                 if (!currentConversationId) return;
                 renderConversationMessages([]);
@@ -1763,6 +2028,10 @@
             $('#chat .chat-area').on('click', '.confirm-action-btn', function() {
                 confirmPendingActions();
             });
+            $('#execution-log-area').on('click', '.exec-pause-btn', function() { callExecutionControl('pause'); });
+            $('#execution-log-area').on('click', '.exec-resume-btn', function() { callExecutionControl('resume'); });
+            $('#execution-log-area').on('click', '.exec-abort-btn', function() { callExecutionControl('abort'); });
+            $('#execution-log-area').on('click', '.exec-takeover-btn', function() { callExecutionControl('takeover'); });
             $('#chat .input-group input').on('keypress', function(e) {
                 if (e.which === 13) {
                     e.preventDefault();
@@ -2021,7 +2290,7 @@
                 applyPanelLayout();
                 renderWorkflowAndLogs(currentLogs || [], currentWorkflowEvents || []);
                 loadApiKeyStatus();
-                loadConversations();
+                loadConversations(true);
                 loadMethodologies();
             });
 

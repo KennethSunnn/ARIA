@@ -1,144 +1,333 @@
+from __future__ import annotations
+
+import json
 import os
+import re
 import time
+from typing import Optional
+
 from dotenv import load_dotenv
 
-# 加载环境变量
-load_dotenv()
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
+
+# 加载环境变量（强制覆盖同名系统变量，避免读取到空值）
+load_dotenv(override=True)
+
+# 默认：火山引擎方舟 OpenAI 兼容接口（文本对话使用 chat.completions，与 ARIA 现有 messages 结构一致）
+DEFAULT_OPENAI_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+DEFAULT_MODEL_NAME = "doubao-seed-2-0-lite-260215"
+
+
+def _is_ark_base_url(base_url: str) -> bool:
+    u = (base_url or "").lower()
+    return "volces.com" in u or "ark.cn-beijing" in u
+
+
+def resolve_inference_api_key(dotenv_path: Optional[str] = None) -> str:
+    """
+    按 OPENAI_BASE_URL 选择密钥：方舟域名优先 ARK_API_KEY；百炼域名优先 DASHSCOPE_API_KEY。
+    web_app 传入项目根 .env 路径以保证与工作目录无关。
+    """
+    if dotenv_path:
+        load_dotenv(dotenv_path=dotenv_path, override=True)
+    else:
+        load_dotenv(override=True)
+
+    base = (os.getenv("OPENAI_BASE_URL") or DEFAULT_OPENAI_BASE_URL).lower()
+    oa = (os.getenv("OPENAI_API_KEY") or "").strip()
+    vo = (os.getenv("VOLCANO_API_KEY") or "").strip()
+    ar = (os.getenv("ARK_API_KEY") or "").strip()
+    ds = (os.getenv("DASHSCOPE_API_KEY") or "").strip()
+    ali = (os.getenv("ALIYUN_API_KEY") or "").strip()
+
+    if _is_ark_base_url(base):
+        return ar or vo or oa
+    return ds or ali or oa or ar or vo
+
 
 class VolcengineLLM:
-    """火山引擎LLM基座"""
+    """
+    OpenAI 官方 Python SDK，对接：
+    - 火山方舟：https://www.volcengine.com/docs/82379/1399008 （默认）
+    - 阿里云百炼兼容模式（将 OPENAI_BASE_URL 改为 dashscope 兼容地址即可）
+    文本链路使用 chat.completions；多模态 responses API 需另行扩展。
+    """
+
     def __init__(self, api_key=None):
-        try:
-            from volcenginesdkarkruntime import Ark
-            # 优先使用传入的 key；与 web_app 一致：VOLCANO_API_KEY，兼容 ARK_API_KEY
-            api_key = api_key or os.getenv('VOLCANO_API_KEY') or os.getenv('ARK_API_KEY')
-            
-            if api_key:
-                self.ark = Ark(
-                    base_url='https://ark.cn-beijing.volces.com/api/v3',
-                    api_key=api_key,
-                )
-                self.model_name = os.getenv('MODEL_NAME', 'doubao-seed-2-0-mini-260215')
-                self.max_retries = 3
-                print("API Key配置成功")
-            else:
-                # 初始化但不创建Ark实例，等待后续设置API key
-                self.ark = None
-                self.model_name = os.getenv('MODEL_NAME', 'doubao-seed-2-0-mini-260215')
-                self.max_retries = 3
-                print("等待设置API Key")
-        except ImportError:
-            print("未安装 volcenginesdkarkruntime，请运行: pip install 'volcengine-python-sdk[ark]'")
-            self.ark = None
-        except Exception as e:
-            print(f"初始化LLM失败: {str(e)}")
-            self.ark = None
-    
-    def set_api_key(self, api_key):
-        """设置API Key"""
-        try:
-            from volcenginesdkarkruntime import Ark
-            self.ark = Ark(
-                base_url='https://ark.cn-beijing.volces.com/api/v3',
-                api_key=api_key,
-            )
-            print("API Key设置成功")
-            return True
-        except Exception as e:
-            print(f"设置API Key失败: {str(e)}")
+        self.base_url = os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL).rstrip("/")
+        self.model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
+        self.api_key = (api_key or "").strip() or resolve_inference_api_key()
+        self.max_retries = 3
+        self.timeout_s = float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
+        self.enable_thinking = os.getenv("ENABLE_THINKING", "true").strip().lower() in ("1", "true", "yes", "on")
+        self._client: OpenAI | None = None
+        self._rebuild_client()
+        if self.api_key:
+            print("API Key配置成功")
+        else:
+            print("等待设置API Key")
+
+    def _dashscope_thinking_extra(self) -> bool:
+        """仅百炼兼容接口传 enable_thinking；方舟等网关勿传，避免 400。"""
+        if not self.enable_thinking:
             return False
-    
+        u = (self.base_url or "").lower()
+        return "dashscope" in u or "aliyuncs.com" in u
+
+    def _rebuild_client(self) -> None:
+        if not self.api_key:
+            self._client = None
+            return
+        self._client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            max_retries=0,
+        )
+
+    def set_api_key(self, api_key):
+        self.api_key = (api_key or "").strip()
+        self._rebuild_client()
+        ok = bool(self.api_key)
+        print("API Key设置成功" if ok else "设置API Key失败: empty_api_key")
+        return ok
+
+    @staticmethod
+    def _sanitize_for_user(text: str, max_len: int = 450) -> str:
+        s = (text or "").replace("\r", " ").replace("\n", " ").strip()
+        s = re.sub(r"sk-[a-zA-Z0-9]{8,}", "sk-***", s)
+        if len(s) > max_len:
+            s = s[: max_len - 3] + "..."
+        return s or "未知错误"
+
+    @staticmethod
+    def _is_invalid_api_key_error(e: APIStatusError) -> bool:
+        if e.status_code == 401:
+            return True
+        body = e.body
+        if not isinstance(body, dict):
+            return False
+        err = body.get("error")
+        if isinstance(err, dict) and err.get("code") == "invalid_api_key":
+            return True
+        return False
+
+    def _invalid_api_key_user_message(self) -> str:
+        if _is_ark_base_url(self.base_url):
+            return (
+                "API Key 无效（HTTP 401）。方舟接口不接受当前密钥，重试无效。\n\n"
+                "请在 .env 配置火山方舟 API Key：ARK_API_KEY=...\n"
+                "并确认 OPENAI_BASE_URL=https://ark.cn-beijing.volces.com/api/v3\n\n"
+                "文档：https://www.volcengine.com/docs/82379/1399008"
+            )
+        return (
+            "API Key 无效（HTTP 401，invalid_api_key）。阿里云已拒绝本次请求，重试不会解决。\n\n"
+            "请按下面检查：\n"
+            "1）在百炼控制台创建或复制「API-KEY」，粘贴到项目根目录 .env：DASHSCOPE_API_KEY=你的密钥\n"
+            "2）密钥完整、无多余空格或引号；不要用其它云产品的 Key 冒充百炼 Key\n"
+            "3）保存 .env 后重新发一条消息；若仍报错，关闭窗口后重新运行 launch_aria.bat\n\n"
+            "获取 Key：https://help.aliyun.com/zh/model-studio/get-api-key\n"
+            "错误说明：https://help.aliyun.com/zh/model-studio/error-code#apikey-error"
+        )
+
+    @staticmethod
+    def _status_error_summary(e: APIStatusError) -> str:
+        parts = [f"HTTP {e.status_code}"]
+        body = e.body
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, dict):
+                msg = err.get("message") or err.get("code")
+                if msg:
+                    parts.append(str(msg))
+            elif isinstance(err, str) and err.strip():
+                parts.append(err.strip())
+        if len(parts) == 1 and getattr(e, "message", None):
+            parts.append(str(e.message))
+        return " ".join(parts)
+
+    @staticmethod
+    def _usage_from_completion(completion) -> dict[str, int] | None:
+        u = getattr(completion, "usage", None)
+        if u is None:
+            return None
+        if hasattr(u, "model_dump"):
+            d = u.model_dump()
+        elif isinstance(u, dict):
+            d = u
+        else:
+            d = {
+                "prompt_tokens": getattr(u, "prompt_tokens", None),
+                "completion_tokens": getattr(u, "completion_tokens", None),
+                "total_tokens": getattr(u, "total_tokens", None),
+            }
+        pt = int(d.get("prompt_tokens") or 0)
+        ct = int(d.get("completion_tokens") or 0)
+        tt = int(d.get("total_tokens") or 0)
+        if pt == 0 and ct == 0 and tt == 0:
+            return None
+        if tt <= 0:
+            tt = pt + ct
+        return {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt}
+
+    def _merge_completion_usage_into(self, completion, totals: dict[str, int]) -> None:
+        chunk = self._usage_from_completion(completion)
+        if not chunk:
+            return
+        totals["prompt_tokens"] += chunk["prompt_tokens"]
+        totals["completion_tokens"] += chunk["completion_tokens"]
+        totals["total_tokens"] += chunk["total_tokens"]
+        totals["llm_calls"] += 1
+
     def handle_api_error(self, error, attempt):
-        """智能API错误处理"""
         print(f"API错误处理 (尝试 {attempt}/3): {str(error)}")
-        
-        # 错误分类处理
-        if "429" in str(error):
-            # 速率限制，增加等待时间
+        err_s = str(error)
+        if "401" in err_s or "invalid_api_key" in err_s.lower():
+            print("认证失败（API Key），跳过重试等待")
+            return
+        if "429" in err_s:
             wait_time = attempt * 10
             print(f"速率限制，等待 {wait_time} 秒后重试...")
             time.sleep(wait_time)
-        elif "404" in str(error):
-            # 资源不存在，可能是模型名称错误
+        elif "404" in err_s:
             print("检查模型配置...")
-        elif "500" in str(error):
-            # 服务器错误，等待后重试
+            time.sleep(attempt * 2)
+        elif "500" in err_s:
             wait_time = attempt * 5
             print(f"服务器错误，等待 {wait_time} 秒后重试...")
             time.sleep(wait_time)
         else:
-            # 其他错误，默认等待
             wait_time = attempt * 3
             print(f"未知错误，等待 {wait_time} 秒后重试...")
             time.sleep(wait_time)
-    
-    def generate(self, messages):
-        """调用火山引擎API生成内容"""
-        if not self.ark:
-            return """请先设置API Key"""
-        
+
+    @staticmethod
+    def _message_to_text(message) -> str:
+        if message is None:
+            return ""
+        content = getattr(message, "content", None)
+        reasoning = getattr(message, "reasoning_content", None)
+
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        if isinstance(content, list):
+            text_parts = []
+            for p in content:
+                if isinstance(p, dict):
+                    text_parts.append(p.get("text", ""))
+                else:
+                    text_parts.append(getattr(p, "text", "") or "")
+            merged = "".join(text_parts).strip()
+            if merged:
+                return merged
+        if isinstance(reasoning, str) and reasoning.strip():
+            return reasoning.strip()
+        return ""
+
+    def generate(self, messages, model_name=None) -> tuple[str, dict[str, int]]:
+        """OpenAI 兼容 chat.completions；返回 (文本, 本次调用累计的 token 用量)。"""
+        totals: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "llm_calls": 0}
+        if not self.api_key or not self._client:
+            if _is_ark_base_url(self.base_url):
+                return "请先设置 ARK_API_KEY（火山方舟），见 https://www.volcengine.com/docs/82379/1399008", totals
+            return "请先设置 API Key（.env 中 DASHSCOPE_API_KEY 等）", totals
+
+        selected_model = (model_name or self.model_name or "").strip() or self.model_name
+        last_error = ""
+        use_thinking = self._dashscope_thinking_extra()
+        thinking_fallback_done = False
+        thinking_feature_on = self._dashscope_thinking_extra()
+
+        openai_messages = [
+            {"role": m.get("role", "user"), "content": m.get("content", "")} for m in (messages or [])
+        ]
+
         for attempt in range(self.max_retries):
             try:
-                print("火山引擎API调用:")
-                print(f"  Model: {self.model_name}")
-                
-                # 转换消息格式，适应官方SDK
-                input_messages = []
-                for msg in messages:
-                    if msg['role'] == 'system':
-                        input_messages.append({
-                            "role": "system",
-                            "content": msg['content']
-                        })
-                    elif msg['role'] == 'user':
-                        input_messages.append({
-                            "role": "user",
-                            "content": msg['content']
-                        })
-                
-                # 使用官方SDK调用API
-                response = self.ark.responses.create(
-                    model=self.model_name,
-                    input=input_messages
-                )
-                
-                print("API调用成功")
-                
-                # 处理响应
-                if hasattr(response, 'output') and len(response.output) > 0:
-                    for item in response.output:
-                        if hasattr(item, 'type') and item.type == 'message':
-                            if hasattr(item, 'content') and len(item.content) > 0:
-                                for content_item in item.content:
-                                    if hasattr(content_item, 'type') and content_item.type == 'output_text':
-                                        if hasattr(content_item, 'text'):
-                                            return content_item.text
-                
-                # 尝试多种响应格式
-                if hasattr(response, 'choices') and len(response.choices) > 0:
-                    choice = response.choices[0]
-                    if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
-                        return choice.message.content
-                    elif hasattr(choice, 'content'):
-                        return choice.content
-                
-                # 尝试直接从响应对象获取内容
-                if hasattr(response, 'content'):
-                    return response.content
-                
-                # 尝试获取完整响应
-                import json
-                try:
-                    return json.dumps(response.__dict__, ensure_ascii=False)
-                except:
-                    pass
-                
-                return """未收到有效响应"""
-            except Exception as e:
-                print(f"API调用失败 ({attempt+1}/{self.max_retries}): {str(e)}")
+                print("OpenAI 兼容 Chat Completions:")
+                print(f"  base_url={self.base_url}  model={selected_model}  dashscope_thinking_extra={use_thinking}")
+
+                create_kwargs: dict = {
+                    "model": selected_model,
+                    "messages": openai_messages,
+                    "timeout": self.timeout_s,
+                }
+                if use_thinking:
+                    create_kwargs["extra_body"] = {"enable_thinking": True}
+
+                completion = self._client.chat.completions.create(**create_kwargs)
+                self._merge_completion_usage_into(completion, totals)
+                choice = completion.choices[0] if completion.choices else None
+                text = self._message_to_text(choice.message if choice else None)
+                if text:
+                    return text, totals
+
+                last_error = "接口返回 200 但未解析到正文；可尝试 ENABLE_THINKING=false 或更换 MODEL_NAME"
+                if thinking_feature_on and use_thinking and not thinking_fallback_done:
+                    print("正文为空，关闭 enable_thinking 后重试")
+                    use_thinking = False
+                    thinking_fallback_done = True
+                    continue
+
+                raw = completion.model_dump() if hasattr(completion, "model_dump") else str(completion)
+                snippet = self._sanitize_for_user(json.dumps(raw, ensure_ascii=False, default=str), 400)
+                return f"未收到有效模型输出。{last_error} 响应摘要：{snippet}", totals
+
+            except APIStatusError as e:
+                if self._is_invalid_api_key_error(e):
+                    print(f"API调用失败（无效密钥，不再重试）: {self._status_error_summary(e)}")
+                    return self._invalid_api_key_user_message(), totals
+                summary = self._status_error_summary(e)
+                last_error = summary
+                print(f"API调用失败 ({attempt + 1}/{self.max_retries}): {last_error}")
+                if (
+                    thinking_feature_on
+                    and use_thinking
+                    and not thinking_fallback_done
+                    and e.status_code in (400, 422)
+                ):
+                    print("关闭 enable_thinking 后重试一次（兼容部分模型/网关）")
+                    use_thinking = False
+                    thinking_fallback_done = True
+                    continue
                 if attempt < self.max_retries - 1:
-                    # 使用智能错误处理
                     self.handle_api_error(e, attempt + 1)
                 else:
-                    print("多次失败，返回默认响应")
-                    return """API调用失败，请检查配置"""
+                    hint = self._failure_hint()
+                    return f"API调用失败：{self._sanitize_for_user(last_error)}\n\n{hint}", totals
+
+            except APITimeoutError as e:
+                last_error = f"请求超时（{int(self.timeout_s)}s）：{e}"
+                print(f"API调用失败 ({attempt + 1}/{self.max_retries}): {last_error}")
+                if attempt < self.max_retries - 1:
+                    self.handle_api_error(e, attempt + 1)
+                else:
+                    return f"API调用失败：{self._sanitize_for_user(last_error)}", totals
+
+            except APIConnectionError as e:
+                last_error = f"网络连接失败：{e}"
+                print(f"API调用失败 ({attempt + 1}/{self.max_retries}): {last_error}")
+                if attempt < self.max_retries - 1:
+                    self.handle_api_error(e, attempt + 1)
+                else:
+                    return f"API调用失败：{self._sanitize_for_user(last_error)}", totals
+
+            except Exception as e:
+                last_error = str(e)
+                print(f"API调用失败 ({attempt + 1}/{self.max_retries}): {last_error}")
+                if attempt < self.max_retries - 1:
+                    self.handle_api_error(e, attempt + 1)
+                else:
+                    return f"API调用失败：{self._sanitize_for_user(last_error)}\n\n{self._failure_hint()}", totals
+
+        return f"API调用失败：{self._sanitize_for_user(last_error)}", totals
+
+    def _failure_hint(self) -> str:
+        if _is_ark_base_url(self.base_url):
+            return (
+                "请核对：1) ARK_API_KEY 为方舟控制台密钥；2) MODEL_NAME 与方舟推理接入点一致；"
+                "3) OPENAI_BASE_URL=https://ark.cn-beijing.volces.com/api/v3；4) pip install -U \"openai>=1.0\"。"
+            )
+        return (
+            "请核对：1) DASHSCOPE_API_KEY；2) MODEL_NAME；"
+            "3) OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1；4) ENABLE_THINKING=false。"
+        )

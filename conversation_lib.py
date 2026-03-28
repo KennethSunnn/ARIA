@@ -141,3 +141,41 @@ class ConversationLibrary:
                 return True
         return False
 
+    def format_dialogue_context_for_prompt(
+        self,
+        conversation_id: str,
+        *,
+        max_messages: int = 12,
+        max_chars_per_message: int = 1000,
+        max_total_chars: int = 9000,
+    ) -> str:
+        """在写入本轮 user 消息之前调用：用已有消息拼出近期对话，供规划器/解析器理解指代。"""
+        conv = self.get_conversation(conversation_id)
+        if not conv:
+            return ""
+        messages = conv.get("messages")
+        if not isinstance(messages, list) or not messages:
+            return ""
+        tail = messages[-max_messages:]
+        lines: list[str] = []
+        total = 0
+        for m in tail:
+            if not isinstance(m, dict):
+                continue
+            role = str(m.get("role") or "").strip().lower()
+            if role not in ("user", "assistant"):
+                continue
+            raw = str(m.get("content") or "").strip()
+            if not raw:
+                continue
+            if len(raw) > max_chars_per_message:
+                raw = raw[: max_chars_per_message - 20] + "\n... [已截断]"
+            label = "User" if role == "user" else "Assistant"
+            block = f"{label}: {raw}"
+            if total + len(block) + 1 > max_total_chars:
+                lines.append("... [更早消息已省略]")
+                break
+            lines.append(block)
+            total += len(block) + 1
+        return "\n".join(lines).strip()
+

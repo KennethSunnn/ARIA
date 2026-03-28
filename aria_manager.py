@@ -1,13 +1,241 @@
-from config import MODEL_POOL, AGENT_TEMPLATES
+from config import MODEL_POOL
+import ipaddress
 import json
+import os
 import random
 import re
+import shlex
+import shutil
+import socket
+import subprocess
+import threading
 import time
 import uuid
+import webbrowser
+from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import parse_qs, quote, quote_plus, unquote_plus, urlparse
+
+import requests
 
 from llm.volcengine_llm import VolcengineLLM
 from memory.memory_system import ShortTermMemory, MidTermMemory, LongTermMemory
+
+_OFFICE_MAX_CONTENT_CHARS = 400_000
+_OFFICE_MAX_ROWS = 2000
+_OFFICE_MAX_COLS = 64
+_OFFICE_MAX_PPT_BULLETS = 100
+
+# desktop_open_app：Windows 下扫描快捷方式/可执行文件的上限，避免开始菜单过大拖慢执行
+_WIN_APP_SCAN_CAP = 8000
+
+
+def _windows_desktop_path_bonus(p: Path) -> int:
+    try:
+        s = str(p.resolve()).lower()
+    except OSError:
+        s = str(p).lower()
+    if "desktop" in s or "桌面" in s:
+        return 120
+    return 0
+
+
+def _windows_open_app_keywords(query: str) -> list[str]:
+    """从用户/规划器给出的名称扩展出用于匹配快捷方式、exe 的关键词。"""
+    q0 = (query or "").strip().strip('"').strip("'")
+    if not q0:
+        return []
+    ql = q0.lower()
+    parts: list[str] = [q0]
+    if ql != q0:
+        parts.append(ql)
+    if "微" in q0 or "wechat" in ql or "weixin" in ql or "tencent" in ql:
+        parts.extend(["wechat", "微信", "WeChat", "Weixin"])
+    if "wps" in ql or "kingsoft" in ql or "金山" in q0:
+        parts.extend(["wps", "WPS", "kingsoft", "金山", "WPS Office"])
+    seen: set[str] = set()
+    out: list[str] = []
+    for x in parts:
+        t = x.strip()
+        if len(t) >= 1 and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+def _windows_score_app_match(keywords: list[str], path: Path) -> int:
+    stem = path.stem
+    name = path.name
+    stem_l = stem.lower()
+    name_l = name.lower()
+    best = 0
+    for kw in keywords:
+        k = kw.strip()
+        if len(k) < 1:
+            continue
+        kl = k.lower()
+        if k == stem or k == name or kl == stem_l or kl == name_l:
+            best = max(best, 1000)
+        elif len(k) >= 2 and (k in stem or k in name or kl in stem_l or kl in name_l):
+            best = max(best, 880)
+        elif len(kl) >= 3 and (kl in stem_l.replace(" ", "") or kl in name_l.replace(" ", "")):
+            best = max(best, 720)
+    return best
+
+
+def _windows_known_office_exes() -> list[Path]:
+    env = os.environ
+    pf = env.get("ProgramFiles", r"C:\Program Files")
+    pf86 = env.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    la = env.get("LOCALAPPDATA", "")
+    return [
+        Path(pf) / "Tencent" / "WeChat" / "WeChat.exe",
+        Path(pf86) / "Tencent" / "WeChat" / "WeChat.exe",
+        Path(la) / "Kingsoft" / "WPS Office" / "ksolaunch.exe",
+        Path(pf) / "Kingsoft" / "WPS Office" / "office6" / "wps.exe",
+        Path(pf86) / "Kingsoft" / "WPS Office" / "office6" / "wps.exe",
+    ]
+
+
+def _windows_collect_shortcuts_and_exes() -> list[Path]:
+    home = Path.home()
+    env = os.environ
+    shallow_roots: list[Path] = []
+    for d in (
+        home / "Desktop",
+        home / "OneDrive" / "Desktop",
+        home / "OneDrive" / "桌面",
+        Path(env.get("PUBLIC", "")) / "Desktop",
+    ):
+        if d.is_dir():
+            shallow_roots.append(d)
+
+    found: list[Path] = []
+    seen: set[str] = set()
+
+    def push(p: Path) -> bool:
+        if not p.is_file():
+            return True
+        try:
+            key = str(p.resolve())
+        except OSError:
+            key = str(p)
+        if key in seen:
+            return True
+        seen.add(key)
+        found.append(p)
+        return len(found) < _WIN_APP_SCAN_CAP
+
+    for base in shallow_roots:
+        if len(found) >= _WIN_APP_SCAN_CAP:
+            break
+        try:
+            for pattern in ("*.lnk", "*.exe"):
+                for p in base.glob(pattern):
+                    if not push(p):
+                        return found
+            for sub in base.iterdir():
+                if len(found) >= _WIN_APP_SCAN_CAP:
+                    break
+                if not sub.is_dir():
+                    continue
+                try:
+                    for pattern in ("*.lnk", "*.exe"):
+                        for p in sub.glob(pattern):
+                            if not push(p):
+                                return found
+                except OSError:
+                    continue
+        except OSError:
+            continue
+
+    for base in (
+        Path(env.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+        Path(env.get("PROGRAMDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+    ):
+        if len(found) >= _WIN_APP_SCAN_CAP:
+            break
+        if not base.is_dir():
+            continue
+        try:
+            for p in base.rglob("*.lnk"):
+                if not push(p):
+                    return found
+            for p in base.rglob("*.exe"):
+                if not push(p):
+                    return found
+        except OSError:
+            continue
+
+    return found
+
+
+def _windows_resolve_app_executable(app: str) -> Path | None:
+    """
+    在常见安装目录、桌面、开始菜单中解析可启动文件（.lnk / .exe）。
+    无法解析时返回 None，由调用方再尝试 `start` 兜底。
+    """
+    raw = (app or "").strip().strip('"').strip("'")
+    if not raw:
+        return None
+
+    trial = Path(raw)
+    if trial.is_file():
+        return trial
+    if not trial.is_absolute():
+        t2 = Path.cwd() / raw
+        if t2.is_file():
+            return t2
+
+    kws = _windows_open_app_keywords(raw)
+    if not kws:
+        return None
+
+    for cand in _windows_known_office_exes():
+        if cand.is_file() and _windows_score_app_match(kws, cand) >= 650:
+            return cand
+
+    scored: list[tuple[int, Path]] = []
+    for p in _windows_collect_shortcuts_and_exes():
+        sc = _windows_score_app_match(kws, p)
+        if sc <= 0:
+            continue
+        scored.append((sc + _windows_desktop_path_bonus(p), p))
+
+    if not scored:
+        return None
+
+    scored.sort(key=lambda x: (-x[0], len(str(x[1]))))
+    best, path = scored[0]
+    if best < 650:
+        return None
+    return path
+
+
+class _HTMLToTextParser(HTMLParser):
+    """将 HTML 转为可读纯文本（跳过 script/style）。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in ("script", "style", "noscript", "template"):
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style", "noscript", "template") and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0 and data and data.strip():
+            self._chunks.append(data.strip())
+
+    def text(self) -> str:
+        raw = " ".join(self._chunks)
+        return re.sub(r"\s+", " ", raw).strip()
 
 
 class TaskCancelledError(Exception):
@@ -21,22 +249,39 @@ class ARIAManager:
         "kb_delete_low_quality",
         "conversation_archive",
         "conversation_new",
+        "shell_run",
+        "file_write",
+        "file_move",
+        "file_delete",
+        "browser_open",
+        "browser_click",
+        "browser_type",
+        "desktop_open_app",
+        "desktop_hotkey",
+        "web_fetch",
+        "web_understand",
     }
-    HIGH_RISK_ACTION_TYPES = {"kb_delete_all"}
+    HIGH_RISK_ACTION_TYPES = {"kb_delete_all", "file_delete", "shell_run", "desktop_hotkey"}
+    USER_GATE_ACTION_TYPES = frozenset(
+        {"file_write", "file_move", "file_delete", "shell_run", "desktop_open_app", "desktop_hotkey"}
+    )
 
     def __init__(self, api_key: Optional[str] = None):
         self.model_pool = MODEL_POOL
-        self.agent_templates = AGENT_TEMPLATES
         self.execution_log = []  # 全流程日志（给UI展示）
         self.workflow_events = []  # 结构化工作流事件（给实时时间线）
         self.model_thoughts = {}  # 模型思考过程
         self.current_conversation_id = ""
         self.current_task_id = ""
         self.current_request_id = ""
+        self.action_screenshots_for_execution = False  # 由异步执行会话线程按前端/会话设置临时打开
         self.cancelled_requests: set[str] = set()
         self.event_sink = None
         self.api_key = api_key or ""
         self.llm = VolcengineLLM(self.api_key) if self.api_key else VolcengineLLM(None)
+        env_model = (os.getenv("MODEL_NAME") or "").strip()
+        pool_model = str(self.model_pool.get("llm") or "").strip()
+        self.unified_model = env_model or pool_model or str(getattr(self.llm, "model_name", "") or "").strip() or "doubao-seed-2-0-lite-260215"
         
         # 初始化三级记忆
         self.stm = ShortTermMemory()  # 短期记忆
@@ -69,7 +314,57 @@ class ARIAManager:
             "kb_delete_low_quality": self._exec_kb_delete_low_quality,
             "conversation_new": self._exec_conversation_new,
             "conversation_archive": self._exec_conversation_archive,
+            "shell_run": self._exec_shell_run,
+            "file_write": self._exec_file_write,
+            "file_move": self._exec_file_move,
+            "file_delete": self._exec_file_delete,
+            "browser_open": self._exec_browser_open,
+            "browser_click": self._exec_browser_click,
+            "browser_type": self._exec_browser_type,
+            "desktop_open_app": self._exec_desktop_open_app,
+            "desktop_hotkey": self._exec_desktop_hotkey,
+            "web_fetch": self._exec_web_fetch,
+            "web_understand": self._exec_web_understand,
         }
+        self.execution_sessions: dict[str, dict[str, Any]] = {}
+        self.execution_lock = threading.Lock()
+        self.allowed_work_root = Path(os.path.abspath("."))
+        self.max_action_steps = 30
+        self.default_step_timeout_s = 90
+        self.last_model_trace: dict[str, Any] = {}
+        self.shell_blocklist = [
+            "rm -rf /",
+            "del /f /s /q",
+            "format ",
+            "shutdown",
+            "net user",
+            "reg delete",
+        ]
+        self._token_usage_tls = threading.local()
+
+    def reset_token_usage(self) -> None:
+        """按线程清空用量计数（每个 HTTP 请求 / 异步执行线程各自一份）。"""
+        self._token_usage_tls.accumulator = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "llm_calls": 0,
+        }
+
+    def get_token_usage_summary(self) -> dict[str, int]:
+        acc = getattr(self._token_usage_tls, "accumulator", None)
+        if not acc:
+            return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "llm_calls": 0}
+        return {k: int(acc.get(k) or 0) for k in ("prompt_tokens", "completion_tokens", "total_tokens", "llm_calls")}
+
+    def _accumulate_usage_dict(self, usage: dict[str, int]) -> None:
+        if not usage:
+            return
+        if not hasattr(self._token_usage_tls, "accumulator"):
+            self.reset_token_usage()
+        acc = self._token_usage_tls.accumulator
+        for k in ("prompt_tokens", "completion_tokens", "total_tokens", "llm_calls"):
+            acc[k] = acc.get(k, 0) + int(usage.get(k) or 0)
 
     def set_api_key(self, api_key: Optional[str]) -> None:
         api_key = (api_key or "").strip()
@@ -77,6 +372,9 @@ class ARIAManager:
             return
         self.api_key = api_key
         self.llm = VolcengineLLM(api_key if api_key else None)
+        env_model = (os.getenv("MODEL_NAME") or "").strip()
+        pool_model = str(self.model_pool.get("llm") or "").strip()
+        self.unified_model = env_model or pool_model or str(getattr(self.llm, "model_name", "") or "").strip() or "doubao-seed-2-0-lite-260215"
 
     def set_conversation_context(self, conversation_id: str) -> None:
         self.current_conversation_id = conversation_id or ""
@@ -209,16 +507,50 @@ class ARIAManager:
                 return method
         return None
 
-    def _call_llm(self, messages: list[dict[str, str]], fallback_text: str = "") -> str:
-        """调用 LLM；失败时返回 fallback_text。"""
+    def _call_llm(self, messages: list[dict[str, str]], fallback_text: str = "", agent_code: str = "") -> str:
+        """调用 LLM（全链路统一模型）；失败时返回 fallback_text。"""
         if self.is_cancelled():
             return fallback_text
+        model = self.unified_model
+        errors: list[str] = []
+        max_try = 3
         try:
-            if not getattr(self, "llm", None) or getattr(self.llm, "ark", None) is None:
+            if not getattr(self, "llm", None) or not callable(getattr(self.llm, "generate", None)):
                 return fallback_text
-            return self.llm.generate(messages)
+            for attempt in range(max_try):
+                try:
+                    text, usage = self.llm.generate(messages, model_name=model)
+                    self._accumulate_usage_dict(usage)
+                    self.last_model_trace = {
+                        "agent_code": agent_code or "",
+                        "model": model,
+                        "timestamp": time.time(),
+                    }
+                    self.push_event(
+                        "llm_route",
+                        "success",
+                        agent_code or "TaskParser",
+                        f"模型: {model}",
+                        {"agent_code": agent_code or "", "model": model},
+                    )
+                    return text
+                except Exception as inner:
+                    err = str(inner)
+                    errors.append(f"{attempt + 1}:{err}")
+                    if attempt + 1 < max_try:
+                        time.sleep(min(2 * (attempt + 1), 8))
+                        continue
+                    raise
+            raise RuntimeError("; ".join(errors) if errors else "llm_call_failed")
         except Exception as e:
             self.push_log("LLM", f"LLM调用失败: {str(e)}", "warning")
+            self.push_event(
+                "llm_route",
+                "error",
+                agent_code or "TaskParser",
+                f"模型调用失败: {model}",
+                {"agent_code": agent_code or "", "model": model, "error": str(e), "tried": errors},
+            )
             return fallback_text
 
     def _extract_json_object(self, text: str) -> dict[str, Any]:
@@ -234,6 +566,57 @@ class ARIAManager:
             return json.loads(m.group(0))
         except Exception:
             return {}
+
+    def _default_persona_brief(self, agent_type: str, step: str, description: str) -> str:
+        step_s = (step or "").strip() or "当前步骤"
+        desc_s = (description or "").strip()
+        if agent_type == "VisionExecAgent":
+            return (
+                f"你是视觉向执行专家。针对步骤「{step_s}」，从图像/界面/图表角度给出可核验的观察与结论；"
+                "说明信息来源假设；勿编造未见内容。"
+                f"交付须覆盖：{desc_s or '该步骤要求的视觉分析产出'}。"
+            )
+        if agent_type == "SpeechExecAgent":
+            return (
+                f"你是语音/口语向执行专家。针对步骤「{step_s}」，给出适合朗读或对话场景的表述；"
+                "标注语气与停顿建议（如需要）；保持简洁可懂。"
+                f"交付须覆盖：{desc_s or '该步骤要求的语音相关产出'}。"
+            )
+        return (
+            f"你是文本向执行专家。针对步骤「{step_s}」，进行清晰推理与结构化输出；"
+            "区分事实与推断；给出可执行的下一步建议（如适用）。"
+            f"交付须覆盖：{desc_s or '该步骤要求的文本产出'}。"
+        )
+
+    def _methodology_summary_text(self, method: dict[str, Any] | None) -> str:
+        if not method:
+            return ""
+        scene = str(method.get("scene") or method.get("scenario") or "").strip()
+        steps = method.get("solve_steps") or method.get("steps") or []
+        if isinstance(steps, str):
+            steps = [s.strip() for s in re.split(r"[\n;；]+", steps) if s.strip()]
+        lines = ["【方法论上下文 — 请与下列子步骤对齐，勿偏离总目标】", f"场景(scene)：{scene or '（未命名）'}", "步骤纲要(solve_steps)："]
+        for i, s in enumerate(steps, 1):
+            lines.append(f"  {i}. {s}")
+        return "\n".join(lines)
+
+    def _format_exec_results_as_plain_text(self, results: list[dict[str, Any]]) -> str:
+        blocks: list[str] = []
+        for idx, r in enumerate(results, start=1):
+            agent_type = str(r.get("agent_type") or "")
+            display_name = str(r.get("agent_name") or self._agent_profile(agent_type)["name"])
+            step = str(r.get("step") or "")
+            desc = str(r.get("description") or "")
+            body = str(r.get("result") or "")
+            blocks.append(
+                f"## ARIA_PRIOR_STEP_{idx}\n"
+                f"- 执行者显示名: {display_name}\n"
+                f"- agent_type: {agent_type}\n"
+                f"- step: {step}\n"
+                f"- description: {desc}\n"
+                f"- 完整产出(result，勿省略理解):\n{body}\n"
+            )
+        return "\n".join(blocks) if blocks else ""
 
     def _normalize_keywords(self, keywords: Any) -> list[str]:
         if keywords is None:
@@ -334,7 +717,7 @@ class ARIAManager:
                 ),
             },
         ]
-        llm_text = self._call_llm(messages, fallback_text="")
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="MethodSaver")
         llm_data = self._extract_json_object(llm_text)
         if llm_data:
             should_save = bool(llm_data.get("should_save", False))
@@ -365,7 +748,7 @@ class ARIAManager:
             },
             {"role": "user", "content": f"用户输入：{text}"},
         ]
-        llm_text = self._call_llm(messages, fallback_text="")
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="TaskParser")
         data = self._extract_json_object(llm_text)
         if data:
             mode = str(data.get("mode", "")).strip().lower()
@@ -389,6 +772,7 @@ class ARIAManager:
         return {"mode": "task", "reason": "task_fallback", "source": "heuristic", "confidence": 0.7}
 
     def derive_action_risk(self, action_type: str, risk: str) -> str:
+        action_type = self._normalize_action_type_alias(action_type)
         normalized = (risk or "").strip().lower()
         if normalized not in ("low", "medium", "high"):
             normalized = "medium"
@@ -398,6 +782,14 @@ class ARIAManager:
 
     def normalize_action_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
         mode = str(plan.get("mode") or "").strip().lower()
+        if mode == "clarify":
+            return {
+                "mode": "clarify",
+                "summary": str(plan.get("summary") or "").strip(),
+                "requires_confirmation": True,
+                "actions": [],
+                "requires_double_confirmation": False,
+            }
         if mode not in ("action", "qa", "small_talk"):
             mode = "qa"
         actions = plan.get("actions")
@@ -407,16 +799,22 @@ class ARIAManager:
         for action in actions:
             if not isinstance(action, dict):
                 continue
-            action_type = str(action.get("type") or "").strip()
+            action_type = self._normalize_action_type_alias(str(action.get("type") or "").strip())
             if not action_type or action_type not in self.ALLOWED_ACTION_TYPES:
                 continue
+            params = action.get("params") if isinstance(action.get("params"), dict) else {}
+            risk = self.derive_action_risk(action_type, str(action.get("risk") or "medium"))
+            if action_type == "shell_run":
+                cmd = str(params.get("command") or "")
+                if any(k in cmd.lower() for k in ["del ", "rm ", "shutdown", "format ", "reg delete"]):
+                    risk = "high"
             normalized_actions.append(
                 {
                     "type": action_type,
                     "target": str(action.get("target") or "").strip(),
                     "filters": action.get("filters") if isinstance(action.get("filters"), dict) else {},
-                    "params": action.get("params") if isinstance(action.get("params"), dict) else {},
-                    "risk": self.derive_action_risk(action_type, str(action.get("risk") or "medium")),
+                    "params": params,
+                    "risk": risk,
                     "reason": str(action.get("reason") or "").strip(),
                 }
             )
@@ -428,30 +826,271 @@ class ARIAManager:
             "requires_double_confirmation": self.requires_double_confirmation(normalized_actions),
         }
 
-    def plan_actions(self, user_input: str) -> dict[str, Any]:
+    def _browser_open_raw_url(self, action: dict[str, Any]) -> str:
+        params = action.get("params") if isinstance(action.get("params"), dict) else {}
+        u = str(params.get("url") or "").strip()
+        if u:
+            return u
+        return str(action.get("target") or "").strip()
+
+    def _is_concrete_browser_open_url(self, url: str) -> bool:
+        if not url or len(url) > 2048:
+            return False
+        lowered = url.lower().strip()
+        bogus_substrings = (
+            "default browser",
+            "the browser",
+            "默认浏览器",
+            "打开浏览器",
+            "open browser",
+        )
+        if any(s in lowered for s in bogus_substrings):
+            return False
+        if " " in lowered and not lowered.startswith(("http://", "https://")):
+            return False
+        if lowered.startswith(("http://", "https://")):
+            return True
+        if "localhost" in lowered:
+            return True
+        if re.match(r"^\d{1,3}(\.\d{1,3}){3}(:\d+)?(/|$)", lowered):
+            return True
+        if re.match(r"^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(/|\?|$)", lowered):
+            return True
+        return False
+
+    def _default_search_url(self, query: str) -> str:
+        q = (query or "").strip() or "今日新闻"
+        enc = quote_plus(q)
+        if re.search(r"[\u4e00-\u9fff]", q):
+            return f"https://www.baidu.com/s?wd={enc}"
+        return f"https://www.bing.com/search?q={enc}"
+
+    def _default_search_url_for_fetch(self, query: str) -> str:
+        """供 web_understand/web_fetch 使用：优先 DuckDuckGo HTML 版，服务端可解析；Bing/百度 SERP 常为空壳或强 JS。"""
+        q = (query or "").strip() or "news"
+        enc = quote_plus(q)
+        return f"https://html.duckduckgo.com/html/?q={enc}"
+
+    def _bing_search_url_for_fetch(self, query: str) -> str:
+        q = (query or "").strip() or "news"
+        return f"https://www.bing.com/search?q={quote_plus(q)}"
+
+    def _is_search_engine_results_url(self, url: str) -> bool:
+        if not url:
+            return False
+        u = url.lower()
+        if "baidu.com" in u and ("wd=" in u or "/s?" in u or "word=" in u):
+            return True
+        if "bing.com" in u and "search" in u:
+            return True
+        if "google." in u and "/search" in u:
+            return True
+        if "duckduckgo.com" in u:
+            return True
+        if "sogou.com" in u and ("query=" in u or "keyword=" in u):
+            return True
+        if "html.duckduckgo.com" in u and "/html/" in u:
+            return True
+        return False
+
+    def _extract_search_query_from_url(self, url: str) -> str:
+        try:
+            p = urlparse(url)
+            qs = parse_qs(p.query)
+            for key in ("q", "wd", "word", "query", "keyword"):
+                vals = qs.get(key)
+                if vals and str(vals[0]).strip():
+                    return unquote_plus(str(vals[0]).strip())
+        except Exception:
+            pass
+        return ""
+
+    def _understand_fetch_url_candidates(self, primary_url: str, question: str) -> list[str]:
+        """搜索引擎页可能单源抓取失败，按序尝试主 URL、DuckDuckGo HTML、Bing。"""
+        seen: set[str] = set()
+        ordered: list[str] = []
+
+        def add(u: str) -> None:
+            u = (u or "").strip()
+            if not u or u in seen:
+                return
+            seen.add(u)
+            ordered.append(u)
+
+        add(primary_url)
+        q = self._extract_search_query_from_url(primary_url).strip()
+        if not q and (question or "").strip():
+            q = (question or "").strip()[:500]
+        if q:
+            add(f"https://html.duckduckgo.com/html/?q={quote_plus(q)}")
+            add(self._bing_search_url_for_fetch(q))
+        return ordered
+
+    def _user_intent_browser_only(self, text: str) -> bool:
+        """用户明确只要打开网页、不要服务端摘要时，不自动插入 web_understand。"""
+        t = (text or "").strip()
+        if not t:
+            return False
+        if any(p in t for p in ("只打开", "只要打开", "仅打开", "打开就行", "just open", "only open")):
+            return True
+        return False
+
+    def _prefer_qa_for_weather_without_explicit_web(self, text: str) -> bool:
+        """无明确「打开/搜索/网上」等意图时，天气类问题走 qa，避免固定触发 web_understand + browser_open。"""
+        t = (text or "").strip()
+        if not t:
+            return False
+        if not any(k in t for k in ("天气", "气温", "下雨", "降温", "升温", "台风", "雾霾", "空气质量", "冷不冷", "热不热")):
+            return False
+        if any(
+            k in t
+            for k in (
+                "搜索",
+                "打开",
+                "链接",
+                "网址",
+                "浏览器",
+                "网上",
+                "联网",
+                "搜一下",
+                "查一下",
+                "百度",
+            )
+        ):
+            return False
+        tl = t.lower()
+        if "google" in tl or "bing" in tl:
+            return False
+        return True
+
+    def _enrich_research_actions(self, user_input: str, plan: dict[str, Any]) -> None:
+        """若计划仅有「打开搜索引擎」的 browser_open，则前置 web_understand（服务端可解析搜索页 + 模型作答）。"""
+        if plan.get("mode") != "action":
+            return
+        actions = plan.get("actions")
+        if not isinstance(actions, list) or not actions:
+            return
+        text = (user_input or "").strip()
+        if self._user_intent_browser_only(text):
+            return
+        for action in actions:
+            if not isinstance(action, dict):
+                return
+            t = self._normalize_action_type_alias(str(action.get("type") or ""))
+            if t in ("web_fetch", "web_understand"):
+                return
+            if t != "browser_open":
+                return
+            raw = self._browser_open_raw_url(action)
+            if not self._is_search_engine_results_url(raw):
+                return
+        fetch_url = self._default_search_url_for_fetch(text)
+        question = text[:2000] if len(text) > 2000 else text
+        wu: dict[str, Any] = {
+            "type": "web_understand",
+            "target": fetch_url,
+            "filters": {},
+            "params": {"url": fetch_url, "question": question},
+            "risk": "low",
+            "reason": "服务端抓取搜索摘要并结合模型作答（优先可解析的搜索页；本机打开的地址可能为百度等，与抓取源可能不同）",
+        }
+        plan["actions"] = [wu] + list(actions)
+        plan["requires_double_confirmation"] = self.requires_double_confirmation(plan["actions"])
+
+    def _mend_browser_open_actions(self, user_input: str, plan: dict[str, Any]) -> None:
+        """模型常把网址写在 target 却留空 params，或填「默认浏览器」；补成可打开的搜索引擎 URL（服务端不代抓网页）。"""
+        if plan.get("mode") != "action":
+            return
+        actions = plan.get("actions")
+        if not isinstance(actions, list):
+            return
+        text = (user_input or "").strip()
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            t = self._normalize_action_type_alias(str(action.get("type") or ""))
+            if t != "browser_open":
+                continue
+            raw = self._browser_open_raw_url(action)
+            if self._is_concrete_browser_open_url(raw):
+                continue
+            url = self._default_search_url(text)
+            params = action.get("params") if isinstance(action.get("params"), dict) else {}
+            action["params"] = {**params, "url": url}
+            action["target"] = url
+            if not str(action.get("reason") or "").strip():
+                action["reason"] = "在本机浏览器打开搜索结果页（ARIA 不在服务器上抓取网页，需在本机查看）"
+
+    def _resolve_task_id_for_turn(self, reuse_task_id: str | None) -> str:
+        t = (reuse_task_id or "").strip()
+        if t:
+            try:
+                uuid.UUID(t)
+                return t
+            except ValueError:
+                pass
+        return str(uuid.uuid4())
+
+    def plan_actions(self, user_input: str, dialogue_context: str = "") -> dict[str, Any]:
         text = (user_input or "").strip()
         if not text:
             return {"mode": "small_talk", "summary": "empty_input", "requires_confirmation": True, "actions": []}
+
+        if self._prefer_qa_for_weather_without_explicit_web(text):
+            return {
+                "mode": "qa",
+                "summary": "weather_or_ambient_query_no_explicit_web",
+                "requires_confirmation": False,
+                "actions": [],
+                "requires_double_confirmation": False,
+            }
 
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "你是ARIA动作规划器。请把用户输入解析为：small_talk / qa / action。"
-                    "如果是action，输出可执行动作列表。禁止编造执行结果。"
+                    "你是ARIA动作规划器。请把用户输入解析为：small_talk / qa / action / clarify。"
+                    "如果是 action，输出可执行动作列表；如果是 clarify，actions 必须为空数组，summary 用 1.2.3. 列出需用户确认或选择的信息。禁止编造执行结果。"
                     "仅输出JSON："
-                    "{\"mode\":\"small_talk|qa|action\","
+                    "{\"mode\":\"small_talk|qa|action|clarify\","
                     "\"summary\":\"...\","
                     "\"actions\":[{\"type\":\"...\",\"target\":\"...\",\"filters\":{},\"params\":{},\"risk\":\"low|medium|high\",\"reason\":\"...\"}]}"
-                    "可用动作类型示例：kb_delete_all,kb_delete_by_keyword,kb_delete_low_quality,conversation_archive,conversation_new。"
+                    "可用动作类型示例：kb_delete_all,kb_delete_by_keyword,kb_delete_low_quality,conversation_archive,conversation_new,shell_run,file_write,file_move,file_delete,browser_open,browser_click,browser_type,desktop_open_app,desktop_hotkey,web_fetch,web_understand。"
+                    "desktop_open_app：params.app 或顶层 target 填应用名/路径；Windows 下会扫描本机桌面（含 OneDrive 桌面）、开始菜单与微信/WPS 等常见安装路径，再启动；仍失败时让用户提供 .exe 完整路径。"
+                    "本地文档/表格：能确定相对工作区的路径与内容时优先 file_write（params.path、params.content、mode overwrite|append）；格式/路径/是否覆盖不明时用 mode=clarify 追问，勿直接拒绝。"
+                    "Office 二进制（服务端生成，用户确认执行后可下载）：path 以 .docx 结尾时 params.content 为正文、可选 params.title；.xlsx 时优先 params.rows 为二维数组[[\"列1\",\"列2\"],[\"a\",\"b\"]]，否则用 content 多行、制表符或逗号分列；.pptx 时 params.title 与 params.bullets 字符串数组或 content 多行（首行可作标题）。路径建议 data/artifacts/文件名。"
+                    "禁止因「没有 Word/Office」就声明无法完成：须列举替代（记事本、Markdown、WPS、LibreOffice、VS Code、工作区 file_write 写 .md/.txt/.csv 等）。"
+                    "Web 对话不能发送文件附件；真实落盘仅能通过 action 的 file_write（用户确认后写入 ARIA 工作区，可下载）。禁止在 qa 文本里虚构「已保存到 Windows 文档/.docx 已生成」等未执行动作的结果。"
+                    "缺软件或不会配置时：可输出 web_understand（检索安装/配置步骤，params.question 写清系统与软件名）或 clarify 让用户选已装软件；不要只给失败理由。"
+                    "browser_open：仅在本机默认浏览器打开 URL；web_fetch：服务端抓取并抽取正文（params.url）；web_understand：抓取后由 params.question 指定要让模型回答的问题，并生成理解与摘要（需 API Key）。"
+                    "用户要查资料、搜材料、总结要点、对比依据且依赖外部信息时：必须包含 web_understand（params.url 为可访问页面 URL，params.question 填用户任务），不要只输出 browser_open。"
+                    "若用户给了具体文章/文档链接并要求摘要，用 web_understand 或 web_fetch；可附加 browser_open 方便本机查看。"
+                    "常识、概念解释、无需「今日/最新/实时」联网信息时：用 mode=qa 且 actions 为空数组，不要生成打开浏览器的动作。"
+                    "多步示例：web_understand（搜索或文章 URL + question）后可跟 browser_open（同一或不同 URL）。"
+                    "browser_open 的 target 或 params.url 必须是可打开的具体网址，禁止「默认浏览器」等描述；搜索类应给出完整搜索 URL（如 https://www.baidu.com/s?wd=关键词）。"
                 ),
             },
-            {"role": "user", "content": text},
+            {
+                "role": "user",
+                "content": (
+                    f"【本会话近期对话】\n{(dialogue_context or '').strip()}\n\n【本轮输入】\n{text}"
+                    if (dialogue_context or "").strip()
+                    else text
+                ),
+            },
         ]
-        llm_text = self._call_llm(messages, fallback_text="")
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="TaskParser")
         llm_plan = self._extract_json_object(llm_text)
         plan = self.normalize_action_plan(llm_plan) if llm_plan else {}
-        if plan and (plan.get("mode") != "qa" or plan.get("actions")):
+        if plan.get("mode") == "clarify":
+            return plan
+        if plan and plan.get("mode") not in ("qa", "clarify"):
+            self._mend_browser_open_actions(text, plan)
+            self._enrich_research_actions(text, plan)
+            return plan
+        if plan and plan.get("mode") == "qa" and plan.get("actions"):
+            self._mend_browser_open_actions(text, plan)
+            self._enrich_research_actions(text, plan)
             return plan
 
         lowered = text.lower()
@@ -467,14 +1106,104 @@ class ARIAManager:
                 "risk": self.derive_action_risk(action_type, "medium"),
                 "reason": "用户请求清理知识库",
             }]
-            return {
+            plan_kb = {
                 "mode": "action",
                 "summary": "识别为知识库清理操作",
                 "requires_confirmation": True,
                 "actions": actions,
                 "requires_double_confirmation": self.requires_double_confirmation(actions),
             }
+            self._mend_browser_open_actions(text, plan_kb)
+            return plan_kb
+        if any(k in lowered for k in ["执行命令", "运行命令", "run command", "terminal"]) and any(s in text for s in ["`", "cmd", "powershell", "python", "pip "]):
+            cmd = text
+            m = re.search(r"`([^`]+)`", text)
+            if m:
+                cmd = m.group(1).strip()
+            actions = [{
+                "type": "shell_run",
+                "target": "terminal",
+                "filters": {},
+                "params": {"command": cmd, "cwd": "."},
+                "risk": self.derive_action_risk("shell_run", "medium"),
+                "reason": "用户请求执行终端命令",
+            }]
+            plan_sh = {
+                "mode": "action",
+                "summary": "识别为终端命令执行",
+                "requires_confirmation": True,
+                "actions": actions,
+                "requires_double_confirmation": self.requires_double_confirmation(actions),
+            }
+            self._mend_browser_open_actions(text, plan_sh)
+            return plan_sh
+        if any(k in lowered for k in ["创建文件", "写入文件", "保存到文件", "write file"]):
+            actions = [{
+                "type": "file_write",
+                "target": "filesystem",
+                "filters": {},
+                "params": {"path": "output.txt", "content": text, "mode": "overwrite"},
+                "risk": "low",
+                "reason": "用户请求写入文件",
+            }]
+            plan_fw = {
+                "mode": "action",
+                "summary": "识别为文件写入操作",
+                "requires_confirmation": True,
+                "actions": actions,
+                "requires_double_confirmation": False,
+            }
+            self._mend_browser_open_actions(text, plan_fw)
+            return plan_fw
+        web_search_hints = (
+            "搜一下", "搜点", "搜索", "查资料", "网上找", "上网查", "帮我搜", "去搜",
+            "热点新闻", "今日新闻", "最新新闻", "搜材料", "找材料", "检索",
+            "search the web", "search online", "google it", "look up online",
+        )
+        if any(h in text for h in web_search_hints) or any(h in lowered for h in ("search for", "look up on the web")):
+            fetch_url = self._default_search_url_for_fetch(text)
+            open_url = self._default_search_url(text)
+            q = text[:2000] if len(text) > 2000 else text
+            actions = [
+                {
+                    "type": "web_understand",
+                    "target": fetch_url,
+                    "filters": {},
+                    "params": {"url": fetch_url, "question": q},
+                    "risk": "low",
+                    "reason": "服务端抓取可解析搜索页（DuckDuckGo HTML 等）并结合模型摘要（对话内查看；无法自动点开 SERP 具体条目）",
+                },
+                {
+                    "type": "browser_open",
+                    "target": open_url,
+                    "filters": {},
+                    "params": {"url": open_url},
+                    "risk": "low",
+                    "reason": "在本机浏览器打开搜索引擎（中文默认百度）",
+                },
+            ]
+            plan_ws = {
+                "mode": "action",
+                "summary": "识别为联网检索：先摘要后本机打开搜索页",
+                "requires_confirmation": True,
+                "actions": actions,
+                "requires_double_confirmation": self.requires_double_confirmation(actions),
+            }
+            self._mend_browser_open_actions(text, plan_ws)
+            self._enrich_research_actions(text, plan_ws)
+            return plan_ws
         return {"mode": "qa", "summary": "未识别为可执行动作", "requires_confirmation": True, "actions": []}
+
+    def format_clarify_plan_for_user(self, plan: dict[str, Any]) -> str:
+        s = str(plan.get("summary") or "").strip()
+        tail = (
+            "\n\n说明：当前为网页对话，无法像聊天软件那样直接发送文件附件。"
+            "若要在本机得到可下载文件，请通过「确认执行」后的 file_write 写入 ARIA 工作区，"
+            "执行完成后回复里会给出 /api/workspace_file?path=… 下载链接。"
+        )
+        if not s:
+            return "为继续推进，请补充更具体的需求（例如保存路径、文件格式、使用的软件名称等）。" + tail
+        return "为准确帮你完成，请先确认或补充下列信息（可直接逐条回复）：\n\n" + s + tail
 
     def format_action_plan_for_user(self, plan: dict[str, Any]) -> str:
         actions = plan.get("actions") or []
@@ -494,6 +1223,73 @@ class ARIAManager:
     def requires_double_confirmation(self, actions: list[dict[str, Any]]) -> bool:
         return any((a.get("risk") or "medium") == "high" for a in (actions or []))
 
+    def actions_require_user_gate(self, actions: list[dict[str, Any]]) -> bool:
+        """本地写文件、删文件、终端、打开桌面应用等须用户确认后才执行，不参与自动执行。"""
+        for a in actions or []:
+            if not isinstance(a, dict):
+                continue
+            t = self._normalize_action_type_alias(str(a.get("type") or ""))
+            if t in self.USER_GATE_ACTION_TYPES:
+                return True
+        return False
+
+    def _ensure_safe_path(self, raw_path: str) -> Path:
+        p = Path(raw_path or "").expanduser()
+        if not p.is_absolute():
+            p = (self.allowed_work_root / p).resolve()
+        else:
+            p = p.resolve()
+        root = self.allowed_work_root.resolve()
+        if root != p and root not in p.parents:
+            raise ValueError(f"path_outside_allowlist: {p}")
+        return p
+
+    def _sanitize_shell_command(self, command: str) -> str:
+        cmd = (command or "").strip()
+        lowered = cmd.lower()
+        if not cmd:
+            raise ValueError("empty_command")
+        for bad in self.shell_blocklist:
+            if bad in lowered:
+                raise ValueError(f"blocked_command:{bad}")
+        return cmd
+
+    def _capture_screenshot(self, prefix: str) -> list[str]:
+        """满足以下任一即截屏：环境变量 ARIA_ACTION_SCREENSHOT，或本次执行请求中 action_screenshots 为真。"""
+        env_on = (os.getenv("ARIA_ACTION_SCREENSHOT") or "").strip().lower() in ("1", "true", "yes", "on")
+        client_on = bool(getattr(self, "action_screenshots_for_execution", False))
+        if not env_on and not client_on:
+            return []
+        ts = int(time.time() * 1000)
+        out_dir = self.allowed_work_root / "data" / "artifacts" / "screenshots"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{prefix}_{ts}.png"
+        try:
+            from PIL import ImageGrab  # type: ignore
+            img = ImageGrab.grab()
+            img.save(str(out_path))
+            return [str(out_path)]
+        except Exception:
+            return []
+
+    def _normalize_action_type_alias(self, action_type: str) -> str:
+        mapping = {
+            "terminal_run": "shell_run",
+            "cmd_run": "shell_run",
+            "file_create": "file_write",
+            "file_rename": "file_move",
+            "browser_navigate": "browser_open",
+            "app_open": "desktop_open_app",
+            "http_get": "web_fetch",
+            "fetch_url": "web_fetch",
+            "web_read": "web_fetch",
+            "read_webpage": "web_fetch",
+            "summarize_url": "web_understand",
+            "web_summarize": "web_understand",
+        }
+        t = (action_type or "").strip()
+        return mapping.get(t, t)
+
     def execute_actions(
         self,
         actions: list[dict[str, Any]],
@@ -503,19 +1299,309 @@ class ARIAManager:
         conversation_manager: Any,
     ) -> dict[str, Any]:
         report = []
-        for action in actions or []:
-            action_type = action.get("type", "")
+        bounded_actions = (actions or [])[: self.max_action_steps]
+        for idx, action in enumerate(bounded_actions, start=1):
+            raw_type = str(action.get("type") or "")
+            action_type = self._normalize_action_type_alias(raw_type)
             handler = self.action_registry.get(action_type)
+            started = time.time()
+            row = {
+                "step_id": idx,
+                "action": action_type,
+                "input": action,
+                "status": "error",
+                "duration_ms": 0,
+                "stdout": "",
+                "stderr": "",
+                "artifacts": [],
+                "screenshots": [],
+            }
             if not handler:
-                report.append({"action": action_type, "result": {"success": False, "message": "unsupported_action"}})
+                row["stderr"] = "unsupported_action"
+                row["result"] = {"success": False, "message": "unsupported_action"}
+                row["duration_ms"] = int((time.time() - started) * 1000)
+                report.append(row)
                 continue
+            self.push_event(
+                "computer_action",
+                "running",
+                "TaskParser",
+                f"执行动作 #{idx}: {action_type}",
+                {"step_id": idx, "action_type": action_type, "input": action},
+            )
             try:
                 result = handler(action, conversation_id, methodology_manager, conversation_manager)
-                report.append({"action": action_type, "result": result})
+                row["result"] = result if isinstance(result, dict) else {"success": True, "output": result}
+                row["status"] = "success" if row["result"].get("success") is not False else "error"
+                row["stdout"] = str(row["result"].get("stdout") or row["result"].get("message") or "")
+                row["stderr"] = str(row["result"].get("stderr") or "")
+                row["artifacts"] = row["result"].get("artifacts") or []
+                row["screenshots"] = row["result"].get("screenshots") or []
             except Exception as e:
-                report.append({"action": action_type, "result": {"success": False, "message": str(e)}})
-        success_count = sum(1 for r in report if r.get("result", {}).get("success") is not False)
+                row["stderr"] = str(e)
+                row["result"] = {"success": False, "message": str(e)}
+            row["duration_ms"] = int((time.time() - started) * 1000)
+            self.push_event(
+                "computer_action",
+                "success" if row["status"] == "success" else "error",
+                "TaskParser",
+                f"动作 #{idx} 结束: {action_type}",
+                {
+                    "step_id": idx,
+                    "action_type": action_type,
+                    "status": row["status"],
+                    "duration_ms": row["duration_ms"],
+                    "stdout": row["stdout"][:300],
+                    "stderr": row["stderr"][:300],
+                    "artifacts": row["artifacts"],
+                    "screenshots": row["screenshots"],
+                },
+            )
+            report.append(row)
+        success_count = sum(1 for r in report if r.get("status") == "success")
         return {"success_count": success_count, "total": len(report), "report": report}
+
+    def create_execution_session(
+        self,
+        conversation_id: str,
+        request_id: str,
+        actions: list[dict[str, Any]],
+        methodology_manager: Any,
+        conversation_manager: Any,
+        *,
+        action_screenshots: bool = False,
+    ) -> str:
+        session_id = str(uuid.uuid4())
+        with self.execution_lock:
+            self.execution_sessions[session_id] = {
+                "session_id": session_id,
+                "conversation_id": conversation_id,
+                "request_id": request_id,
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "status": "pending",
+                "paused": False,
+                "aborted": False,
+                "manual_takeover": False,
+                "actions": actions or [],
+                "report": [],
+                "error": "",
+                "action_screenshots": bool(action_screenshots),
+                "_methodology_manager": methodology_manager,
+                "_conversation_manager": conversation_manager,
+            }
+        return session_id
+
+    def start_execution_session(self, session_id: str) -> dict[str, Any]:
+        with self.execution_lock:
+            sess = self.execution_sessions.get(session_id)
+            if not sess:
+                return {"success": False, "message": "session_not_found"}
+            if sess["status"] in ("running", "completed"):
+                return {"success": True, "status": sess["status"], "session_id": session_id}
+            sess["status"] = "running"
+            sess["updated_at"] = time.time()
+        t = threading.Thread(target=self._run_execution_session, args=(session_id,), daemon=True)
+        t.start()
+        return {"success": True, "status": "running", "session_id": session_id}
+
+    def _format_execution_report_chat_text(self, report: list[dict[str, Any]], max_total: int = 32000) -> str:
+        parts: list[str] = []
+        for r in report:
+            if not isinstance(r, dict):
+                continue
+            act = str(r.get("action") or "")
+            st = str(r.get("status") or "")
+            inp = r.get("input") if isinstance(r.get("input"), dict) else {}
+            out = str(r.get("stdout") or "").strip()
+            err = str(r.get("stderr") or "").strip()
+            if act in ("web_understand", "web_fetch"):
+                if st == "success" and out:
+                    parts.append(f"【{act}】\n{out}")
+                else:
+                    detail = err or out or "未知错误"
+                    parts.append(f"【{act}】失败：{detail}")
+            elif act == "browser_open":
+                url = self._browser_open_raw_url(inp) if isinstance(inp, dict) else ""
+                if st == "success":
+                    parts.append(f"【browser_open】已尝试在本机打开：{url or '（未解析到 URL）'}")
+                else:
+                    parts.append(f"【browser_open】失败：{err or '未知错误'}")
+            elif act == "file_write":
+                rel = ""
+                if isinstance(inp, dict):
+                    pp = inp.get("params") if isinstance(inp.get("params"), dict) else {}
+                    rel = str(pp.get("path") or "").strip().replace("\\", "/")
+                if st == "success":
+                    lines_fw = ["【file_write】已在 ARIA 工作区内写入文件（非「我的文档」等系统路径，除非您显式写了绝对路径）。"]
+                    if out:
+                        lines_fw.append(out)
+                    if rel and ".." not in rel and not rel.startswith("/"):
+                        lines_fw.append(
+                            "【下载】在同一浏览器打开本 ARIA 站点，新标签访问（或复制到地址栏）：\n"
+                            f"/api/workspace_file?path={quote(rel, safe='')}"
+                        )
+                    parts.append("\n".join(lines_fw))
+                else:
+                    parts.append(f"【file_write】失败：{err or out or '未知错误'}")
+            else:
+                if st != "success":
+                    parts.append(f"【{act}】失败：{err or out or '未知错误'}")
+                elif out:
+                    parts.append(f"【{act}】\n{out}")
+        joined = "\n\n".join(parts).strip()
+        if not joined:
+            return "动作已执行完毕。未生成可展示的步骤输出，请在协作日志或执行报告中查看详情。"
+        if len(joined) > max_total:
+            return joined[: max_total - 120] + f"\n\n... [已截断，原长约 {len(joined)} 字符]"
+        return joined
+
+    def _append_execution_report_to_conversation(
+        self,
+        conversation_id: str,
+        conversation_manager: Any,
+        report: list[dict[str, Any]],
+    ) -> None:
+        if not conversation_id or not conversation_manager:
+            return
+        body = self._format_execution_report_chat_text(report)
+        tu = self.get_token_usage_summary()
+        logs = self.get_execution_log()
+        wfe = self.get_workflow_events()
+        conversation_manager.append_message(
+            conversation_id,
+            "assistant",
+            body,
+            {
+                "logs": logs,
+                "workflow_events": wfe,
+                "token_usage": tu,
+                "execution_summary": True,
+            },
+        )
+        conversation_manager.replace_workflow_events(conversation_id, wfe)
+
+    def _run_execution_session(self, session_id: str) -> None:
+        self.reset_token_usage()
+        with self.execution_lock:
+            sess = self.execution_sessions.get(session_id)
+            if not sess:
+                return
+            actions = list(sess.get("actions") or [])[: self.max_action_steps]
+            methodology_manager = sess.get("_methodology_manager")
+            conversation_manager = sess.get("_conversation_manager")
+            conversation_id = sess.get("conversation_id") or ""
+            request_id = sess.get("request_id") or ""
+            shot_flag = bool(sess.get("action_screenshots"))
+        prev_shots = bool(getattr(self, "action_screenshots_for_execution", False))
+        self.action_screenshots_for_execution = shot_flag
+        report: list[dict[str, Any]] = []
+        try:
+            for idx, action in enumerate(actions, start=1):
+                # cooperative pause/abort checks
+                while True:
+                    with self.execution_lock:
+                        cur = self.execution_sessions.get(session_id) or {}
+                        if cur.get("aborted"):
+                            cur["status"] = "aborted"
+                            cur["updated_at"] = time.time()
+                            cur["token_usage"] = self.get_token_usage_summary()
+                            return
+                        if cur.get("manual_takeover"):
+                            cur["status"] = "manual_takeover"
+                            cur["updated_at"] = time.time()
+                            cur["token_usage"] = self.get_token_usage_summary()
+                            return
+                        is_paused = bool(cur.get("paused"))
+                    if not is_paused:
+                        break
+                    time.sleep(0.2)
+
+                row = self.execute_actions(
+                    [action], conversation_id, request_id, methodology_manager, conversation_manager
+                ).get("report", [])
+                if row:
+                    row[0]["step_id"] = idx
+                    report.append(row[0])
+                with self.execution_lock:
+                    cur = self.execution_sessions.get(session_id)
+                    if not cur:
+                        return
+                    cur["report"] = list(report)
+                    cur["updated_at"] = time.time()
+
+            with self.execution_lock:
+                cur = self.execution_sessions.get(session_id)
+                if not cur:
+                    return
+                cur["status"] = "completed"
+                cur["updated_at"] = time.time()
+                cur["token_usage"] = self.get_token_usage_summary()
+
+            self._append_execution_report_to_conversation(conversation_id, conversation_manager, report)
+        finally:
+            self.action_screenshots_for_execution = prev_shots
+
+    def pause_execution_session(self, session_id: str) -> dict[str, Any]:
+        with self.execution_lock:
+            sess = self.execution_sessions.get(session_id)
+            if not sess:
+                return {"success": False, "message": "session_not_found"}
+            sess["paused"] = True
+            sess["status"] = "paused"
+            sess["updated_at"] = time.time()
+            return {"success": True, "status": "paused"}
+
+    def resume_execution_session(self, session_id: str) -> dict[str, Any]:
+        with self.execution_lock:
+            sess = self.execution_sessions.get(session_id)
+            if not sess:
+                return {"success": False, "message": "session_not_found"}
+            sess["paused"] = False
+            if sess.get("status") == "paused":
+                sess["status"] = "running"
+            sess["updated_at"] = time.time()
+            return {"success": True, "status": sess.get("status")}
+
+    def abort_execution_session(self, session_id: str) -> dict[str, Any]:
+        with self.execution_lock:
+            sess = self.execution_sessions.get(session_id)
+            if not sess:
+                return {"success": False, "message": "session_not_found"}
+            sess["aborted"] = True
+            sess["status"] = "aborted"
+            sess["updated_at"] = time.time()
+            return {"success": True, "status": "aborted"}
+
+    def takeover_execution_session(self, session_id: str) -> dict[str, Any]:
+        with self.execution_lock:
+            sess = self.execution_sessions.get(session_id)
+            if not sess:
+                return {"success": False, "message": "session_not_found"}
+            sess["manual_takeover"] = True
+            sess["status"] = "manual_takeover"
+            sess["updated_at"] = time.time()
+            return {"success": True, "status": "manual_takeover"}
+
+    def get_execution_session(self, session_id: str) -> dict[str, Any]:
+        with self.execution_lock:
+            sess = self.execution_sessions.get(session_id)
+            if not sess:
+                return {"success": False, "message": "session_not_found"}
+            return {
+                "success": True,
+                "session_id": session_id,
+                "conversation_id": sess.get("conversation_id"),
+                "request_id": sess.get("request_id"),
+                "status": sess.get("status"),
+                "paused": sess.get("paused"),
+                "aborted": sess.get("aborted"),
+                "manual_takeover": sess.get("manual_takeover"),
+                "report": sess.get("report") or [],
+                "created_at": sess.get("created_at"),
+                "updated_at": sess.get("updated_at"),
+                "token_usage": sess.get("token_usage"),
+            }
 
     def _exec_kb_delete_all(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
         all_methods = methodology_manager.get_all_methodologies() or []
@@ -549,6 +1635,492 @@ class ARIAManager:
         ok = conversation_manager.set_archived(conv_id, True) if conv_id else False
         return {"success": bool(ok), "conversation_id": conv_id}
 
+    def _exec_shell_run(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") or {}
+        command = self._sanitize_shell_command(str(params.get("command") or ""))
+        cwd = str(params.get("cwd") or ".")
+        timeout_s = int(params.get("timeout_s") or self.default_step_timeout_s)
+        safe_cwd = self._ensure_safe_path(cwd)
+        proc = subprocess.run(
+            command,
+            cwd=str(safe_cwd),
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=max(1, timeout_s),
+        )
+        return {
+            "success": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": (proc.stdout or "")[:4000],
+            "stderr": (proc.stderr or "")[:4000],
+            "artifacts": [],
+            "screenshots": [],
+        }
+
+    @staticmethod
+    def _office_scalar_cell(v: Any) -> Any:
+        if v is None:
+            return ""
+        if isinstance(v, (str, int, float, bool)):
+            return v
+        return str(v)
+
+    def _write_office_docx(self, path: Path, params: dict[str, Any]) -> None:
+        from docx import Document
+
+        doc = Document()
+        title = str(params.get("title") or "").strip()
+        if title:
+            doc.add_heading(title, 0)
+        content = str(params.get("content") or "")
+        if len(content) > _OFFICE_MAX_CONTENT_CHARS:
+            content = content[:_OFFICE_MAX_CONTENT_CHARS]
+        for line in content.splitlines():
+            doc.add_paragraph(line)
+        doc.save(str(path))
+
+    def _write_office_xlsx(self, path: Path, params: dict[str, Any]) -> None:
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        rows_raw = params.get("rows")
+        if isinstance(rows_raw, str):
+            try:
+                rows_raw = json.loads(rows_raw)
+            except Exception:
+                rows_raw = None
+        if isinstance(rows_raw, list) and rows_raw:
+            for r_idx, row in enumerate(rows_raw[:_OFFICE_MAX_ROWS], 1):
+                if isinstance(row, (list, tuple)):
+                    cells = list(row)[:_OFFICE_MAX_COLS]
+                else:
+                    cells = [row]
+                for c_idx, cell in enumerate(cells, 1):
+                    ws.cell(row=r_idx, column=c_idx, value=self._office_scalar_cell(cell))
+        else:
+            content = str(params.get("content") or "")
+            if len(content) > _OFFICE_MAX_CONTENT_CHARS:
+                content = content[:_OFFICE_MAX_CONTENT_CHARS]
+            for r_idx, line in enumerate(content.splitlines()[:_OFFICE_MAX_ROWS], 1):
+                if "\t" in line:
+                    parts = line.split("\t")
+                else:
+                    parts = re.split(r",", line)
+                parts = [p.strip() for p in parts][: _OFFICE_MAX_COLS]
+                for c_idx, val in enumerate(parts, 1):
+                    ws.cell(row=r_idx, column=c_idx, value=val)
+        wb.save(str(path))
+
+    def _write_office_pptx(self, path: Path, params: dict[str, Any]) -> None:
+        from pptx import Presentation
+
+        prs = Presentation()
+        content = str(params.get("content") or "")
+        if len(content) > _OFFICE_MAX_CONTENT_CHARS:
+            content = content[:_OFFICE_MAX_CONTENT_CHARS]
+        lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+        title = str(params.get("title") or "").strip()
+        bullets_raw = params.get("bullets")
+        if isinstance(bullets_raw, str):
+            try:
+                bullets_raw = json.loads(bullets_raw)
+            except Exception:
+                bullets_raw = None
+        if isinstance(bullets_raw, list):
+            b_lines = [str(b).strip() for b in bullets_raw if str(b).strip()][: _OFFICE_MAX_PPT_BULLETS]
+        else:
+            b_lines = []
+        if not title and lines:
+            title = lines[0]
+            lines = lines[1:]
+        if not title:
+            title = "演示"
+        if not b_lines:
+            b_lines = lines[:_OFFICE_MAX_PPT_BULLETS]
+
+        slide0 = prs.slides.add_slide(prs.slide_layouts[0])
+        slide0.shapes.title.text = title
+
+        if b_lines:
+            slide1 = prs.slides.add_slide(prs.slide_layouts[1])
+            slide1.shapes.title.text = "要点"
+            body = slide1.shapes.placeholders[1].text_frame
+            body.text = b_lines[0]
+            for bl in b_lines[1:]:
+                p = body.add_paragraph()
+                p.text = bl
+                p.level = 0
+        prs.save(str(path))
+
+    def _exec_file_write(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") or {}
+        path = self._ensure_safe_path(str(params.get("path") or ""))
+        mode = str(params.get("mode") or "overwrite").lower()
+        ext = path.suffix.lower()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        if ext == ".docx":
+            try:
+                self._write_office_docx(path, params if isinstance(params, dict) else {})
+            except ImportError:
+                return {
+                    "success": False,
+                    "message": "missing_dependency",
+                    "stderr": "未安装 python-docx，请执行：pip install python-docx",
+                    "stdout": "",
+                    "artifacts": [],
+                    "screenshots": [],
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": "docx_write_failed",
+                    "stderr": str(e),
+                    "stdout": "",
+                    "artifacts": [],
+                    "screenshots": [],
+                }
+            return {"success": True, "message": f"file_written:{path}", "artifacts": [str(path)], "screenshots": []}
+
+        if ext in (".xlsx", ".xlsm"):
+            try:
+                self._write_office_xlsx(path, params if isinstance(params, dict) else {})
+            except ImportError:
+                return {
+                    "success": False,
+                    "message": "missing_dependency",
+                    "stderr": "未安装 openpyxl，请执行：pip install openpyxl",
+                    "stdout": "",
+                    "artifacts": [],
+                    "screenshots": [],
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": "xlsx_write_failed",
+                    "stderr": str(e),
+                    "stdout": "",
+                    "artifacts": [],
+                    "screenshots": [],
+                }
+            return {"success": True, "message": f"file_written:{path}", "artifacts": [str(path)], "screenshots": []}
+
+        if ext in (".xls", ".doc"):
+            return {
+                "success": False,
+                "message": "legacy_office_format",
+                "stderr": "服务端仅支持生成 .xlsx / .docx / .pptx，请将路径改为对应扩展名。",
+                "stdout": "",
+                "artifacts": [],
+                "screenshots": [],
+            }
+
+        if ext == ".pptx":
+            try:
+                self._write_office_pptx(path, params if isinstance(params, dict) else {})
+            except ImportError:
+                return {
+                    "success": False,
+                    "message": "missing_dependency",
+                    "stderr": "未安装 python-pptx，请执行：pip install python-pptx",
+                    "stdout": "",
+                    "artifacts": [],
+                    "screenshots": [],
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": "pptx_write_failed",
+                    "stderr": str(e),
+                    "stdout": "",
+                    "artifacts": [],
+                    "screenshots": [],
+                }
+            return {"success": True, "message": f"file_written:{path}", "artifacts": [str(path)], "screenshots": []}
+
+        content = str(params.get("content") or "")
+        with open(path, "a" if mode == "append" else "w", encoding="utf-8") as f:
+            f.write(content)
+        return {"success": True, "message": f"file_written:{path}", "artifacts": [str(path)], "screenshots": []}
+
+    def _exec_file_move(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") or {}
+        src = self._ensure_safe_path(str(params.get("src") or ""))
+        dst = self._ensure_safe_path(str(params.get("dst") or ""))
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        return {"success": True, "message": f"moved:{src}->{dst}", "artifacts": [str(dst)], "screenshots": []}
+
+    def _exec_file_delete(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") or {}
+        target = self._ensure_safe_path(str(params.get("path") or ""))
+        if target.is_dir():
+            shutil.rmtree(str(target))
+        elif target.exists():
+            target.unlink()
+        return {"success": True, "message": f"deleted:{target}", "artifacts": [], "screenshots": []}
+
+    def _resolve_fetch_url(self, action: dict[str, Any]) -> str:
+        params = action.get("params") if isinstance(action.get("params"), dict) else {}
+        u = str(params.get("url") or "").strip()
+        if not u:
+            u = str(action.get("target") or "").strip()
+        if not u:
+            raise ValueError("missing_url")
+        if not u.startswith(("http://", "https://")):
+            u = "https://" + u.lstrip("/")
+        return u
+
+    def _assert_url_host_is_public(self, url: str) -> None:
+        p = urlparse(url)
+        if p.scheme not in ("http", "https"):
+            raise ValueError("fetch_only_http_https")
+        host = p.hostname
+        if not host:
+            raise ValueError("missing_host")
+        try:
+            for res in socket.getaddrinfo(host, None):
+                ip = ipaddress.ip_address(res[4][0])
+                if not ip.is_global:
+                    raise ValueError("blocked_network")
+        except ValueError as e:
+            if str(e) in ("blocked_network", "fetch_only_http_https", "missing_host"):
+                raise
+            raise ValueError("dns_failed") from e
+
+    def _http_get_bytes_capped(
+        self, url: str, max_bytes: int = 2_000_000
+    ) -> tuple[str, bytes, str, Optional[str]]:
+        self._assert_url_host_is_public(url)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        }
+        with requests.get(
+            url,
+            timeout=25,
+            allow_redirects=True,
+            headers=headers,
+            stream=True,
+        ) as r:
+            r.raise_for_status()
+            final_url = r.url
+            self._assert_url_host_is_public(final_url)
+            ctype = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
+            enc = requests.utils.get_encoding_from_headers(r.headers) or r.encoding
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in r.iter_content(chunk_size=65536):
+                if self.is_cancelled():
+                    raise TaskCancelledError()
+                if not chunk:
+                    continue
+                remain = max_bytes - total
+                if remain <= 0:
+                    break
+                if len(chunk) <= remain:
+                    chunks.append(chunk)
+                    total += len(chunk)
+                else:
+                    chunks.append(chunk[:remain])
+                    break
+        return final_url, b"".join(chunks), ctype, enc
+
+    def _html_to_plain_text(self, html: str, max_chars: int) -> str:
+        parser = _HTMLToTextParser()
+        try:
+            parser.feed(html[: min(len(html), 3_000_000)])
+            parser.close()
+        except Exception:
+            pass
+        text = parser.text()
+        if len(text) > max_chars:
+            return text[:max_chars] + f"\n... [正文已截断，共约 {len(text)} 字]"
+        return text
+
+    def _exec_web_fetch(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") if isinstance(action.get("params"), dict) else {}
+        url = self._resolve_fetch_url(action)
+        max_chars = int(params.get("max_chars") or 32000)
+        max_chars = max(1000, min(max_chars, 120_000))
+        final_url, raw, ctype, enc = self._http_get_bytes_capped(url)
+        enc = enc or "utf-8"
+        try:
+            body = raw.decode(enc, errors="replace")
+        except LookupError:
+            body = raw.decode("utf-8", errors="replace")
+        head = body[:4000].lower()
+        looks_html = "html" in ctype or body.lstrip().lower().startswith("<!doctype") or "<html" in head
+        if not looks_html:
+            snippet = body[:max_chars]
+            out = self._cap_fetch_stdout(snippet)
+            return {
+                "success": True,
+                "message": f"fetched_non_html:{final_url}",
+                "stdout": out,
+                "artifacts": [],
+                "screenshots": [],
+            }
+        text = self._html_to_plain_text(body, max_chars)
+        out = self._cap_fetch_stdout(text)
+        return {
+            "success": True,
+            "message": f"fetched:{final_url} chars={len(text)}",
+            "stdout": out,
+            "artifacts": [],
+            "screenshots": [],
+        }
+
+    def _cap_fetch_stdout(self, s: str, lim: int = 96_000) -> str:
+        if len(s) <= lim:
+            return s
+        return s[:lim] + f"\n... [stdout 已截断，总长 {len(s)}]"
+
+    def _exec_web_understand(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") if isinstance(action.get("params"), dict) else {}
+        url = self._resolve_fetch_url(action)
+        question = str(params.get("question") or params.get("prompt") or "").strip()
+        if not question:
+            question = "请用简洁的要点总结该网页的主要内容；若正文不足以判断，请说明。"
+        max_chars = int(params.get("max_chars") or 28000)
+        max_chars = max(4000, min(max_chars, 80_000))
+
+        final_url = url
+        text = ""
+        last_err = ""
+        last_snip = ""
+        fetch_attempts = 0
+        for try_url in self._understand_fetch_url_candidates(url, question):
+            fetch_attempts += 1
+            try:
+                fu, raw, _ctype, enc = self._http_get_bytes_capped(try_url)
+            except Exception as e:
+                last_err = str(e)
+                continue
+            enc = enc or "utf-8"
+            try:
+                html = raw.decode(enc, errors="replace")
+            except (LookupError, UnicodeDecodeError):
+                html = raw.decode("utf-8", errors="replace")
+            candidate = self._html_to_plain_text(html, max_chars)
+            final_url = fu
+            text = candidate
+            if len(candidate.strip()) >= 80:
+                break
+            last_snip = candidate[:2000]
+            last_err = "抓取到的正文过短（常见于需登录或强 JS 渲染的页面）"
+
+        if len(text.strip()) < 80:
+            detail = last_err or "抓取失败"
+            if last_snip:
+                detail += f"；末次摘录预览：{last_snip[:400]}"
+            if fetch_attempts > 1:
+                detail += "（已按序尝试多个搜索源，含 DuckDuckGo HTML 与 Bing）"
+            return {
+                "success": False,
+                "message": "page_too_empty_or_not_html",
+                "stderr": detail,
+                "stdout": (text or last_snip)[:2000],
+                "artifacts": [],
+                "screenshots": [],
+            }
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是网页阅读助手。只根据「网页摘录」作答，不要编造页面上没有的信息。"
+                    "若摘录不完整或无法回答，如实说明。用中文、条理清晰、尽量简洁。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"页面最终 URL：{final_url}\n\n网页摘录：\n{text}\n\n用户问题：{question}",
+            },
+        ]
+        answer = self._call_llm(
+            messages,
+            fallback_text="（未配置 API Key 或模型调用失败，无法生成理解摘要。可先执行 web_fetch 查看原始正文。）",
+            agent_code="TextExecAgent",
+        )
+        answer = (answer or "").strip()
+        out = self._cap_fetch_stdout(answer, lim=48_000)
+        return {
+            "success": True,
+            "message": "web_understood",
+            "stdout": out,
+            "stderr": "",
+            "artifacts": [],
+            "screenshots": [],
+        }
+
+    def _exec_browser_open(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") or {}
+        url = str(params.get("url") or "").strip()
+        if not url:
+            url = str(action.get("target") or "").strip()
+        if not url:
+            raise ValueError("missing_url")
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url.lstrip("/")
+        webbrowser.open(url)
+        shots = self._capture_screenshot("browser_open")
+        return {"success": True, "message": f"browser_opened:{url}", "artifacts": [], "screenshots": shots}
+
+    def _exec_browser_click(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") or {}
+        selector = str(params.get("selector") or "").strip()
+        # Placeholder for real browser automation driver.
+        shots = self._capture_screenshot("browser_click")
+        return {"success": True, "message": f"browser_click_simulated:{selector}", "artifacts": [], "screenshots": shots}
+
+    def _exec_browser_type(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") or {}
+        selector = str(params.get("selector") or "").strip()
+        text = str(params.get("text") or "")
+        # Placeholder for real browser automation driver.
+        shots = self._capture_screenshot("browser_type")
+        return {"success": True, "message": f"browser_type_simulated:{selector}", "stdout": text[:200], "artifacts": [], "screenshots": shots}
+
+    def _exec_desktop_open_app(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") or {}
+        app = str(params.get("app") or "").strip()
+        if not app:
+            app = str(action.get("target") or "").strip()
+        if not app:
+            raise ValueError("missing_app")
+        launched = app
+        try:
+            if os.name == "nt":
+                resolved = _windows_resolve_app_executable(app)
+                if resolved is not None:
+                    os.startfile(str(resolved))
+                    launched = f"{app} -> {resolved}"
+                else:
+                    # 未在桌面/开始菜单/常见路径解析到文件时仍尝试 shell 解析（注册的应用别名等）
+                    subprocess.Popen(["cmd", "/c", "start", "", app], shell=False)
+            else:
+                subprocess.Popen(app, shell=True)
+        except OSError as e:
+            raise ValueError(
+                f"open_failed:{e}（已尝试匹配桌面/开始菜单快捷方式与常见安装路径；仍失败请改用 .exe 完整路径）"
+            ) from e
+        shots = self._capture_screenshot("desktop_open_app")
+        return {"success": True, "message": f"desktop_app_opened:{launched}", "artifacts": [], "screenshots": shots}
+
+    def _exec_desktop_hotkey(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+        params = action.get("params") or {}
+        hotkey = str(params.get("hotkey") or "").strip()
+        # Placeholder for real desktop automation backend.
+        shots = self._capture_screenshot("desktop_hotkey")
+        return {"success": True, "message": f"desktop_hotkey_simulated:{hotkey}", "artifacts": [], "screenshots": shots}
+
     def generate_small_talk_reply(self, user_input: str) -> str:
         text = (user_input or "").strip()
         messages = [
@@ -561,7 +2133,7 @@ class ARIAManager:
             },
             {"role": "user", "content": text or "你好"},
         ]
-        llm_text = self._call_llm(messages, fallback_text="")
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="TextExecAgent")
         cleaned = (llm_text or "").strip()
         if cleaned:
             cleaned = cleaned.replace("```", "").strip()
@@ -572,10 +2144,9 @@ class ARIAManager:
         return "你好，我在。告诉我你想解决什么问题，我马上开始。"
 
     # 1. 解析用户问题
-    def parse_task(self, user_input: str) -> dict:
+    def parse_task(self, user_input: str, dialogue_context: str = "", reuse_task_id: str | None = None) -> dict:
         self.check_cancelled("task_parse_start")
-        # 每次请求生成一个任务ID，供前端只展示当前任务协作日志
-        self.current_task_id = str(uuid.uuid4())
+        self.current_task_id = self._resolve_task_id_for_turn(reuse_task_id)
         self.push_event("task_parse", "running", "TaskParser", "PM 正在解析用户需求")
         self.push_log("TaskParser", "正在分析你的问题", "running")
         # 记录模型思考过程
@@ -594,11 +2165,23 @@ class ARIAManager:
         messages = [
             {
                 "role": "system",
-                "content": "你是ARIA任务解析器。请根据用户输入提取任务类型(task_type)、意图(intent)以及关键词(keywords)。只输出严格JSON，不要多余文本。keywords为数组，元素为短关键词（3-8个字/词）。",
+                "content": (
+                    "你是ARIA任务解析器。请根据用户输入提取任务类型(task_type)、意图(intent)以及关键词(keywords)。只输出严格JSON，不要多余文本。"
+                    "keywords为数组，元素为短关键词（3-8个字/词）。"
+                    "注意：后续多 Agent 链路不会自动在磁盘生成 Word 文件；若用户要可下载文档，通常需要走动作执行(file_write)而非仅靠文本答复。"
+                    "若提供了「本会话近期对话」，请结合上下文理解用户本轮补充或修改是否与上文同一任务相关。"
+                ),
             },
-            {"role": "user", "content": f"用户输入：{user_input}"},
+            {
+                "role": "user",
+                "content": (
+                    f"【本会话近期对话】\n{(dialogue_context or '').strip()}\n\n用户输入：{user_input}"
+                    if (dialogue_context or "").strip()
+                    else f"用户输入：{user_input}"
+                ),
+            },
         ]
-        llm_text = self._call_llm(messages, fallback_text="")
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="TaskParser")
         data = self._extract_json_object(llm_text)
 
         task_info = fallback_task_info
@@ -693,14 +2276,18 @@ class ARIAManager:
         messages = [
             {
                 "role": "system",
-                "content": "你是ARIA方案学习器。请把用户需求抽象成一个可复用的方法论(methodology)。只输出严格JSON，不要多余文本。JSON字段: scene(字符串), keywords(字符串数组), solve_steps(字符串数组), applicable_range(字符串，可选)。",
+                "content": (
+                    "你是ARIA方案学习器。请把用户需求抽象成一个可复用的方法论(methodology)。只输出严格JSON，不要多余文本。"
+                    "JSON字段: scene(字符串), keywords(字符串数组), solve_steps(字符串数组), applicable_range(字符串，可选)。"
+                    "solve_steps 中应体现可替换工具与本地文件落盘思路（如多种编辑器或格式），避免默认绑定单一专有软件。"
+                ),
             },
             {
                 "role": "user",
                 "content": f"用户需求：{task_info.get('user_input','')}\n\n请给出：1) 场景(scene)，2) 关键词(keywords)，3) 解决步骤(solve_steps，4-8条)，4) 适用范围(applicable_range)。",
             },
         ]
-        llm_text = self._call_llm(messages, fallback_text="")
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="SolutionLearner")
         data = self._extract_json_object(llm_text)
         solution = data if data else fallback_solution
         solution["is_success"] = False
@@ -727,27 +2314,39 @@ class ARIAManager:
         steps = method.get("solve_steps", []) or []
         fallback_sub_tasks: list[dict[str, Any]] = []
         for step in steps:
+            st = str(step)
+            desc_fb = f"执行{st}"
+            at_fb = "TextExecAgent"
             fallback_sub_tasks.append(
                 {
                     "sub_task_id": str(uuid.uuid4()),
                     "task_id": task_info["task_id"],
-                    "step": str(step),
-                    "description": f"执行{step}",
-                    "agent_type": "TextExecAgent",
+                    "step": st,
+                    "description": desc_fb,
+                    "agent_type": at_fb,
+                    "persona_brief": self._default_persona_brief(at_fb, st, desc_fb),
                 }
             )
 
         messages = [
             {
                 "role": "system",
-                "content": "你是ARIA任务拆分器。请把solve_steps拆成可执行子任务。只输出严格JSON，不要多余文本。字段：sub_tasks(数组)，数组元素包含 step(字符串), description(字符串), agent_type(只能是 TextExecAgent / VisionExecAgent / SpeechExecAgent)。",
+                "content": (
+                    "你是ARIA总指挥（项目经理），负责拆分子任务并为每个执行位写清「个性化人设与交付要求」。"
+                    "把 solve_steps 拆成可执行子任务。只输出严格JSON，不要多余文本。"
+                    "字段：sub_tasks(数组)。每项必须包含："
+                    "step(字符串), description(字符串), "
+                    "agent_type(只能是 TextExecAgent / VisionExecAgent / SpeechExecAgent), "
+                    "persona_brief(字符串，2-6句中文)：针对该子任务写清角色人设、专业侧重、禁忌与可验收的交付标准，"
+                    "须与 agent_type 一致（文本/视觉/语音侧重不同）。"
+                ),
             },
             {
                 "role": "user",
                 "content": f"任务原始输入：{task_info.get('user_input','')}\n\n方法论场景(scene)：{method.get('scene','') or method.get('scenario','')}\n\nsolve_steps：{steps}",
             },
         ]
-        llm_text = self._call_llm(messages, fallback_text="")
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="TaskSplitter")
         data = self._extract_json_object(llm_text)
         sub_tasks_data = data.get("sub_tasks") if isinstance(data.get("sub_tasks"), list) else None
 
@@ -757,13 +2356,17 @@ class ARIAManager:
             sub_tasks = []
             for item in sub_tasks_data:
                 step = str(item.get("step") or "")
+                atype = str(item.get("agent_type") or "TextExecAgent")
+                desc = str(item.get("description") or f"执行{step}")
+                pb = str(item.get("persona_brief") or "").strip() or self._default_persona_brief(atype, step, desc)
                 sub_tasks.append(
                     {
                         "sub_task_id": str(uuid.uuid4()),
                         "task_id": task_info["task_id"],
                         "step": step,
-                        "description": str(item.get("description") or f"执行{step}"),
-                        "agent_type": str(item.get("agent_type") or "TextExecAgent"),
+                        "description": desc,
+                        "agent_type": atype,
+                        "persona_brief": pb,
                     }
                 )
         
@@ -796,18 +2399,25 @@ class ARIAManager:
         for sub_task in sub_tasks:
             agent_id = str(uuid.uuid4())
             agent_type = sub_task["agent_type"]
-            models = self.agent_templates.get(agent_type, ["llm"])
             assigned_name = self._pick_exec_agent_name(agent_type, used_names_by_type)
+            persona = str(sub_task.get("persona_brief") or "").strip() or self._default_persona_brief(
+                agent_type,
+                str(sub_task.get("step") or ""),
+                str(sub_task.get("description") or ""),
+            )
             # 这里应该实例化具体的Agent类，现在只是模拟
             agents[agent_id] = {
                 "agent_id": agent_id,
                 "agent_type": agent_type,
                 "task": sub_task,
-                "models": models,
+                "persona_brief": persona,
                 "agent_name": assigned_name,
             }
             agent_status[agent_id] = "created"
-            self.record_model_thought("TaskSplitter", f"生成Agent: {agent_type}({assigned_name})，使用模型: {models}")
+            self.record_model_thought(
+                "TaskSplitter",
+                f"生成Agent: {agent_type}({assigned_name})，统一模型: {self.unified_model}",
+            )
         
         # 写入短期记忆
         self.stm.agent_status = agent_status
@@ -824,16 +2434,27 @@ class ARIAManager:
         return agents
 
     # 6. 执行Agent
-    def run_agents(self, agents: dict) -> list:
+    def run_agents(
+        self,
+        agents: dict,
+        method: dict[str, Any] | None = None,
+        dialogue_context: str = "",
+    ) -> list:
         self.check_cancelled("agent_execute_start")
         results: list[dict[str, Any]] = []
         previous_results_text = ""
+        method_ctx = self._methodology_summary_text(method) if method else ""
         for agent_id, agent in agents.items():
             self.check_cancelled("agent_execute_loop")
             agent_type = agent["agent_type"]
             task = agent["task"]
             agent_name = agent.get("agent_name") or self._agent_profile(agent_type)["name"]
             role = self._agent_profile(agent_type)["role"]
+            persona = str(agent.get("persona_brief") or "").strip() or self._default_persona_brief(
+                agent_type,
+                str(task.get("step") or ""),
+                str(task.get("description") or ""),
+            )
             self.push_event(
                 "agent_execute",
                 "running",
@@ -845,29 +2466,45 @@ class ARIAManager:
             self.push_log(agent_type, f"正在执行子任务：{task['description']}", "running")
             # 记录模型思考过程
             self.record_model_thought(agent_type, f"开始执行任务：{task['description']}")
-            self.record_model_thought(agent_type, f"使用模型：{agent['models']}")
+            self.record_model_thought(agent_type, f"统一模型：{self.unified_model}")
 
-            messages = [
-                {
-                    "role": "system",
-                    "content": f"你是ARIA执行专家[{agent_type}]。你将基于给定步骤产出可直接使用的结果。只输出纯文本，不要JSON。",
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"原始任务输入：{self.stm.user_input}\n"
-                        f"当前子任务步骤(step)：{task.get('step','')}\n"
-                        f"子任务描述(description)：{task.get('description','')}\n"
-                        f"已有步骤产出(previous_results)：{previous_results_text or '无'}\n\n"
-                        "请输出该步骤的结果。"
-                    ),
-                },
+            sys_parts = [
+                f"你是ARIA执行专家[{agent_type}]。你将基于给定步骤产出可直接使用的结果。只输出纯文本，不要JSON。",
+                "本链路仅为文本推理：你没有调用 file_write、没有访问用户磁盘。严禁声称「已成功创建/保存 .docx」「已写入 我的文档/此电脑>文档」等；若用户要可下载文件，应明确说明须由用户在动作计划中「确认执行」file_write 到工作区，或自行在本机用 Word 另存。",
+                "Web 聊天窗无法上传附件；不要指导用户「在聊天窗点附件发送」来完成你给它的文件。",
+                "涉及「创建文档/保存文件」时：不要因未安装 Word 就拒绝；应给出可落地方案——例如建议相对路径如 data/artifacts/xxx.md、记事本或 WPS/LibreOffice/VS Code 等替代、以及可复制粘贴的正文草稿。",
+                "若仍缺关键信息（路径、格式、是否覆盖），在答复末尾用简短编号列出 1～3 个需用户确认的问题。",
+                "【总指挥设定的人设与要求】",
+                persona,
             ]
-            llm_text = self._call_llm(messages, fallback_text=f"执行完成：{task['description']}")
+            user_parts = []
+            if (dialogue_context or "").strip():
+                user_parts.append(f"【本会话近期对话（与当前任务同一线程）】\n{(dialogue_context or '').strip()}")
+            if method_ctx:
+                user_parts.append(method_ctx)
+            user_parts.extend(
+                [
+                    f"原始任务输入：{self.stm.user_input}",
+                    f"当前子任务步骤(step)：{task.get('step','')}",
+                    f"子任务描述(description)：{task.get('description','')}",
+                    "【此前各执行者的完整产出（请完整理解，勿遗漏细节；执行链为纯文本传递，无二次解析）】",
+                    previous_results_text if previous_results_text else "（尚无）",
+                    "",
+                    "请仅输出本步骤的最终结果正文。",
+                ]
+            )
+            messages = [
+                {"role": "system", "content": "\n".join(sys_parts)},
+                {"role": "user", "content": "\n".join(user_parts)},
+            ]
+            llm_text = self._call_llm(messages, fallback_text=f"执行完成：{task['description']}", agent_code=agent_type)
 
             result = {
                 "agent_id": agent_id,
                 "agent_type": agent_type,
+                "agent_name": agent_name,
+                "step": task.get("step", ""),
+                "description": task.get("description", ""),
                 "task_id": task["task_id"],
                 "sub_task_id": task["sub_task_id"],
                 "result": llm_text.strip(),
@@ -891,7 +2528,7 @@ class ARIAManager:
                 agent_name_override=agent_name,
             )
 
-            previous_results_text = "\n".join([r["result"] for r in results])
+            previous_results_text = self._format_exec_results_as_plain_text(results)
         
         # 写入短期记忆
         self.stm.results = results
@@ -910,17 +2547,29 @@ class ARIAManager:
             self.record_model_thought("QualityChecker", f"校验第{i+1}个结果：{result['result']}")
 
         fallback_final = "\n".join([result["result"] for result in results])
+        steps_plain = self._format_exec_results_as_plain_text(results if isinstance(results, list) else [])
         messages = [
             {
                 "role": "system",
-                "content": "你是ARIA质量校验员。请基于各子步骤产出生成最终结果，并判断整体是否符合要求。只输出严格JSON，不要多余文本。JSON字段：final_result(字符串), is_success(布尔)。",
+                "content": (
+                    "你是ARIA质量校验员。请基于各子步骤产出生成最终结果，并判断整体是否符合要求。只输出严格JSON，不要多余文本。"
+                    "JSON字段：final_result(字符串), is_success(布尔)。"
+                    "final_result 须汇总可执行建议；若任务与本地文件/软件相关，应包含多种替代路径（如 .md/.txt、常见编辑器），避免单独一句「无法完成」。"
+                    "若子步骤声称已生成 .docx 或已保存到「文档」文件夹等，但整个流程未实际执行 file_write 动作，你必须在 final_result 中删除或纠正此类虚假陈述，并说明：真实文件需用户确认 file_write 计划，或自行在本机创建。"
+                    "Web 对话不能发附件；不要在 final_result 中让用户「通过聊天窗发送文件」。"
+                    "若信息仍不足，在 final_result 中明确写出 1～3 条需用户补充或选择的问题。"
+                ),
             },
             {
                 "role": "user",
-                "content": f"原始任务输入：{self.stm.user_input}\n\n子步骤产出：{json.dumps(results, ensure_ascii=False)}",
+                "content": (
+                    f"原始任务输入：{self.stm.user_input}\n\n"
+                    "下列为各执行者完整产出（纯文本分块，与执行链传递一致，请据此汇总勿臆造）：\n"
+                    f"{steps_plain or '（无）'}"
+                ),
             },
         ]
-        llm_text = self._call_llm(messages, fallback_text="")
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="QualityChecker")
         data = self._extract_json_object(llm_text)
         if not data:
             final_result = fallback_final

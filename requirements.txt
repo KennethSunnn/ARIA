@@ -1,5 +1,8 @@
 python-dotenv
 requests
+openai>=1.40.0
 gradio
 flask
-volcengine-python-sdk[ark]
+python-docx
+openpyxl
+python-pptx

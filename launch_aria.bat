@@ -5,6 +5,12 @@ cd /d "%~dp0"
 
 set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
 if exist "%PYTHON_EXE%" (
+    "%PYTHON_EXE%" -m pip install -r "%~dp0requirements.txt" -q
+) else (
+    python -m pip install -r "%~dp0requirements.txt" -q 2>nul
+)
+
+if exist "%PYTHON_EXE%" (
     start "" "%PYTHON_EXE%" web_app.py
 ) else (
     where python >nul 2>nul

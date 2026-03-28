@@ -1,5 +1,8 @@
 # Secrets — never commit
 .env
+.env.local
+.env.*.local
+!.env.example
 
 # Python
 .venv/
@@ -10,9 +13,18 @@ __pycache__/
 .Python
 *.so
 
-# Local runtime data
+# Local runtime / user data (do not push)
 data/conversations/conversations.json
 data/midterm_memory.json
+data/artifacts/
+data/methodology/methodologies.json
+data/methodology/category_feedback.json
+
+# Keys / certs (if ever added)
+*.pem
+*.key
+id_rsa
+id_ed25519
 
 # IDE / OS
 .idea/
@@ -20,3 +32,6 @@ data/midterm_memory.json
 *.swp
 Thumbs.db
 .DS_Store
+
+# Accidental copies of user Desktop under repo root (e.g. drag-dropped folder)
+桌面/
