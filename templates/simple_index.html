@@ -107,6 +107,11 @@
             font-size: 13px;
             line-height: 1.5;
             box-shadow: 0 4px 16px rgba(37, 99, 235, 0.12);
+            text-align: left;
+            direction: ltr;
+            unicode-bidi: plaintext;
+            white-space: pre-wrap;
+            word-break: break-word;
         }
         .ai-message .message-content {
             background-color: var(--surface-soft);
@@ -928,8 +933,9 @@
                                         data-i18n="app.chat.sendBtnTitle" data-i18n-attr="title" title="Send message">
                                         <i class="fa fa-paper-plane"></i>
                                     </button>
-                                    <button class="btn btn-outline-danger chat-composer-cancel" type="button" id="chat-cancel-btn" disabled style="display: none;">
-                                        <i class="fa fa-stop"></i> <span data-i18n="common.cancel">Cancel</span>
+                                    <button class="btn btn-outline-danger chat-composer-cancel" type="button" id="chat-cancel-btn" disabled style="display: none;"
+                                        data-i18n="common.cancel" data-i18n-attr="title" title="Cancel">
+                                        <i class="fa fa-stop"></i>
                                     </button>
                                 </div>
                             </div>
@@ -2376,40 +2382,45 @@
                 const $chat = $('#chat .chat-area');
                 const $card = $chat.find('.pending-action-card').last();
                 const $btn = $card.find('.confirm-action-btn');
-                const force = $btn.attr('data-force') === '1';
-                $btn.prop('disabled', true).text('…');
-
-                $.ajax({
-                    url: '/api/confirm_actions',
-                    type: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({
-                        conversation_id: currentConversationId,
-                        request_id: currentRequestId || '',
-                        force,
-                        action_screenshots: isActionScreenshotsEnabled(),
-                    }),
-                    success: function(resp) {
-                        const text = escapeHtml(resp.result || tr('app.actionPlan.executed', 'Actions executed.')).replace(/\n/g, '<br>');
-                        $chat.append(`<div class="chat-message ai-message"><div class="message-content">${text}</div></div>`);
-                        currentExecutionSessionId = resp.execution_session_id || currentExecutionSessionId;
-                        if (currentExecutionSessionId) startExecutionStatusPolling();
-                        renderWorkflowAndLogs(resp.logs || [], resp.workflow_events || []);
-                        loadConversations();
-                        loadMethodologies();
-                    },
-                    error: function(xhr) {
-                        if (xhr && xhr.status === 409 && xhr.responseJSON && xhr.responseJSON.requires_double_confirmation) {
-                            const msg = xhr.responseJSON.message || tr('app.actionPlan.doubleConfirmNeeded', 'Second confirmation is required for high-risk actions.');
-                            $chat.append(`<div class="chat-message ai-message"><div class="message-content"><span class="text-warning">${escapeHtml(msg)}</span></div></div>`);
-                            $btn.attr('data-force', '1').prop('disabled', false).text('✓');
-                            return;
+                function sendConfirm(forceFlag) {
+                    $btn.prop('disabled', true).text('…');
+                    $.ajax({
+                        url: '/api/confirm_actions',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({
+                            conversation_id: currentConversationId,
+                            request_id: currentRequestId || '',
+                            force: !!forceFlag,
+                            action_screenshots: isActionScreenshotsEnabled(),
+                        }),
+                        success: function(resp) {
+                            const text = escapeHtml(resp.result || tr('app.actionPlan.executed', 'Actions executed.')).replace(/\n/g, '<br>');
+                            $chat.append(`<div class="chat-message ai-message"><div class="message-content">${text}</div></div>`);
+                            currentExecutionSessionId = resp.execution_session_id || currentExecutionSessionId;
+                            if (currentExecutionSessionId) startExecutionStatusPolling();
+                            renderWorkflowAndLogs(resp.logs || [], resp.workflow_events || []);
+                            loadConversations();
+                            loadMethodologies();
+                        },
+                        error: function(xhr) {
+                            if (!forceFlag && xhr && xhr.status === 409 && xhr.responseJSON && xhr.responseJSON.requires_double_confirmation) {
+                                const msg = xhr.responseJSON.message || tr('app.actionPlan.doubleConfirmNeeded', 'Second confirmation is required for high-risk actions.');
+                                const ok = window.confirm(`${msg}\n\n${tr('app.actionPlan.confirmBtn', 'Confirm and Execute')}?`);
+                                if (ok) {
+                                    sendConfirm(true);
+                                    return;
+                                }
+                                $btn.prop('disabled', false).text('✓');
+                                return;
+                            }
+                            const msg = (xhr && xhr.responseJSON && xhr.responseJSON.message) || tr('app.actionPlan.confirmFailed', 'Failed to execute actions.');
+                            $chat.append(`<div class="chat-message ai-message"><div class="message-content"><span class="text-danger">${escapeHtml(msg)}</span></div></div>`);
+                            $btn.prop('disabled', false).text('✓');
                         }
-                        const msg = (xhr && xhr.responseJSON && xhr.responseJSON.message) || tr('app.actionPlan.confirmFailed', 'Failed to execute actions.');
-                        $chat.append(`<div class="chat-message ai-message"><div class="message-content"><span class="text-danger">${escapeHtml(msg)}</span></div></div>`);
-                        $btn.prop('disabled', false).text('✓');
-                    }
-                });
+                    });
+                }
+                sendConfirm(false);
             }
 
             function rejectPendingActions() {
