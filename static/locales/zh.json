@@ -178,5 +178,19 @@
   "app.session.delete": "删除会话",
   "app.session.deleteConfirm": "确定删除此会话吗？此操作无法撤销。",
   "app.session.deleteFail": "删除失败，请重试。",
-  "app.actionPlan.mustClick": "必须点击下方「确认并执行」按钮才会真正运行命令；仅打字确认不一定触发。高风险动作需按提示二次点击确认。"
+  "app.actionPlan.mustClick": "必须点击下方「确认并执行」按钮才会真正运行命令；仅打字确认不一定触发。高风险动作需按提示二次点击确认。",
+  "app.actionPlan.title": "执行计划（需确认）",
+  "app.actionPlan.summaryFallback": "执行计划已就绪。",
+  "app.actionPlan.highRiskHint": "高风险操作需要二次确认。",
+  "app.actionPlan.confirmBtn": "确认并执行",
+  "app.actionPlan.rejectBtn": "取消执行",
+  "app.actionPlan.confirmHint": "确认前不会执行任何操作",
+  "app.actionPlan.confirming": "执行中...",
+  "app.actionPlan.executed": "动作已执行。",
+  "app.actionPlan.doubleConfirmNeeded": "高风险操作需要二次确认。",
+  "app.actionPlan.doubleConfirmBtn": "高风险：再次点击确认执行",
+  "app.actionPlan.confirmFailed": "执行动作失败。",
+  "app.actionPlan.rejected": "已取消执行计划。",
+  "app.actionPlan.rejectFailed": "取消执行失败。",
+  "app.clarify.pickOption": "快捷选项（点击即可，无需打字）："
 }

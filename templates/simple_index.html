@@ -2242,6 +2242,24 @@
                 return `<ol class="mb-2" style="padding-left:18px;">${items}</ol>`;
             }
 
+            function renderClarifyChoicesCard(choices) {
+                if (!choices || !choices.length) return;
+                const $chat = $('#chat .chat-area');
+                const btns = choices.map(function(c) {
+                    const label = escapeHtml(String(c.label || c.id || ''));
+                    return `<button type="button" class="btn btn-sm btn-outline-primary clarify-choice-btn me-1 mb-1" data-choice-id="${escapeHtml(String(c.id || ''))}">${label}</button>`;
+                }).join('');
+                $chat.append(`
+                    <div class="chat-message ai-message clarify-choice-card">
+                        <div class="message-content">
+                            <div class="text-muted small mb-1">${escapeHtml(tr('app.clarify.pickOption', 'Quick options (click to reply):'))}</div>
+                            <div class="d-flex flex-wrap align-items-center" style="gap:6px;">${btns}</div>
+                        </div>
+                    </div>
+                `);
+                $chat.scrollTop($chat.prop('scrollHeight'));
+            }
+
             function renderPendingActionsCard(plan) {
                 if (!plan || !plan.actions || !plan.actions.length) return;
                 const $chat = $('#chat .chat-area');
@@ -2258,6 +2276,7 @@
                             <div class="alert alert-secondary py-2 px-3 mb-2" style="font-size:13px;">${tr('app.actionPlan.mustClick', 'You must click the confirm button below to run commands.')}</div>
                             <div class="d-flex align-items-center" style="gap:8px;">
                                 <button class="btn btn-sm btn-primary confirm-action-btn" type="button">${tr('app.actionPlan.confirmBtn', 'Confirm and Execute')}</button>
+                                <button class="btn btn-sm btn-outline-secondary reject-action-btn" type="button">${tr('app.actionPlan.rejectBtn', 'Cancel')}</button>
                                 <span class="text-muted">${tr('app.actionPlan.confirmHint', 'No action will run before confirmation.')}</span>
                             </div>
                         </div>
@@ -2303,6 +2322,30 @@
                         const msg = (xhr && xhr.responseJSON && xhr.responseJSON.message) || tr('app.actionPlan.confirmFailed', 'Failed to execute actions.');
                         $chat.append(`<div class="chat-message ai-message"><div class="message-content"><span class="text-danger">${escapeHtml(msg)}</span></div></div>`);
                         $btn.prop('disabled', false).text(tr('app.actionPlan.confirmBtn', 'Confirm and Execute'));
+                    }
+                });
+            }
+
+            function rejectPendingActions() {
+                if (!currentConversationId) return;
+                const $chat = $('#chat .chat-area');
+                
+                $.ajax({
+                    url: '/api/confirm_actions',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({
+                        conversation_id: currentConversationId,
+                        request_id: currentRequestId || '',
+                        action_type: 'reject'
+                    }),
+                    success: function(resp) {
+                        $chat.append(`<div class="chat-message ai-message"><div class="message-content text-muted">${tr('app.actionPlan.rejected', 'Execution cancelled.')}</div></div>`);
+                        $chat.find('.pending-action-card').remove();
+                    },
+                    error: function(xhr) {
+                        const msg = (xhr && xhr.responseJSON && xhr.responseJSON.message) || tr('app.actionPlan.rejectFailed', 'Failed to cancel execution.');
+                        $chat.append(`<div class="chat-message ai-message"><div class="message-content text-muted">${escapeHtml(msg)}</div></div>`);
                     }
                 });
             }
@@ -2465,6 +2508,9 @@
                         $('#temp-ai-message').removeAttr('id');
                         if (resp.needs_confirmation && resp.pending_actions) {
                             renderPendingActionsCard(resp.pending_actions);
+                        }
+                        if (resp.needs_clarify && resp.clarify_choices && resp.clarify_choices.length) {
+                            renderClarifyChoicesCard(resp.clarify_choices);
                         }
                         if (resp.execution_session_id) {
                             startExecutionStatusPolling();
@@ -2701,6 +2747,17 @@
             $('#chat-send-btn').click(sendMessage);
             $('#chat .chat-area').on('click', '.confirm-action-btn', function() {
                 confirmPendingActions();
+            });
+            $('#chat .chat-area').on('click', '.reject-action-btn', function() {
+                rejectPendingActions();
+            });
+            $('#chat .chat-area').on('click', '.clarify-choice-btn', function() {
+                const id = ($(this).attr('data-choice-id') || '').trim();
+                const label = ($(this).text() || '').trim();
+                if (!id) return;
+                $('#chat-text-input').val(label ? ('我选：' + id + '（' + label + '）') : ('我选：' + id));
+                $('#chat .chat-area').find('.clarify-choice-card').remove();
+                sendMessage();
             });
             $('#execution-log-area').on('click', '.exec-pause-btn', function() { callExecutionControl('pause'); });
             $('#execution-log-area').on('click', '.exec-resume-btn', function() { callExecutionControl('resume'); });

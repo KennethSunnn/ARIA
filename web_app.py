@@ -486,7 +486,22 @@ def process_input():
                     )
                 )
 
+        if conversation_id in pending_action_plans:
+            if not _is_confirmation_text(user_input or "") and not (
+                _is_double_confirmation_text(user_input or "")
+                and pending_action_plans.get(conversation_id, {}).get("double_confirm_ready")
+            ):
+                if manager.should_invalidate_pending_for_new_wechat_turn(
+                    llm_user_input or "", dialogue_context
+                ):
+                    pending_action_plans.pop(conversation_id, None)
+
         plan = manager.plan_actions(llm_user_input or "", dialogue_context)
+        wx_sup = manager.supplement_wechat_plan_if_applicable(
+            llm_user_input or "", dialogue_context, plan
+        )
+        if wx_sup:
+            plan = wx_sup
         if plan.get("mode") == "clarify":
             tid = _tid_for_response_non_parse(conversation_id, client_task_id, new_task, conversation_task_bookmark)
             manager.current_task_id = tid
@@ -503,6 +518,8 @@ def process_input():
                 {"logs": logs, "workflow_events": workflow_events, "token_usage": _tu, "clarify_plan": plan, "task_id": tid},
             )
             conversation_manager.replace_workflow_events(conversation_id, workflow_events)
+            cc = plan.get("choices") if isinstance(plan.get("choices"), list) else []
+            clarify_choices = [c for c in cc if isinstance(c, dict) and str(c.get("id") or "").strip()]
             return _json_response({
                 "result": clarify_text,
                 "logs": logs,
@@ -513,6 +530,7 @@ def process_input():
                 "request_id": request_id or "",
                 "needs_confirmation": False,
                 "needs_clarify": True,
+                "clarify_choices": clarify_choices,
                 "model_trace": getattr(manager, "last_model_trace", {}),
                 "token_usage": _tu,
             })
@@ -614,7 +632,24 @@ def process_input():
         
         # 低于 0.7 通常重新学习；强时效任务若已有可用流程模板（分数 ≥ ARIA_TEMPORAL_METHOD_MATCH_FLOOR）则跳过以省 Token
         if score < 0.7:
-            if manager.should_reuse_methodology_without_learn(task_info, score, method):
+            if manager.should_skip_external_methodology_learning(task_info, llm_user_input or ""):
+                method = manager.local_automation_methodology_stub(task_info)
+                manager.push_event(
+                    "method_learn",
+                    "success",
+                    "SolutionLearner",
+                    "本机执行类任务，跳过外网方法论学习",
+                    {
+                        "score": score,
+                        "execution_surface": task_info.get("execution_surface"),
+                    },
+                )
+                manager.push_log(
+                    "SolutionLearner",
+                    "已跳过 learn_from_external（execution_surface=本机/微信自动化）",
+                    "completed",
+                )
+            elif manager.should_reuse_methodology_without_learn(task_info, score, method):
                 manager.push_event(
                     "method_learn",
                     "success",
@@ -735,6 +770,7 @@ def process_input():
 @app.route('/api/confirm_actions', methods=['POST'])
 def confirm_actions():
     data = request.json or {}
+    action_type = data.get('action_type', 'confirm')  # confirm | reject
     action_screenshots = bool(data.get("action_screenshots"))
     conversation_id = (data.get('conversation_id') or '').strip()
     request_id = (data.get('request_id') or '').strip()
@@ -743,6 +779,15 @@ def confirm_actions():
     pending = pending_action_plans.get(conversation_id)
     if not pending:
         return jsonify({'success': False, 'message': '当前没有待确认动作'}), 404
+
+    # 处理拒绝操作
+    if action_type == 'reject':
+        pending_action_plans.pop(conversation_id, None)
+        return jsonify({
+            'success': True,
+            'message': '已取消执行',
+            'rejected': True
+        })
 
     force = bool(data.get('force'))
     actions = pending.get("actions") or []

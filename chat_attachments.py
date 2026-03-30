@@ -48,6 +48,9 @@ ALLOWED_EXTENSIONS = frozenset(
         "jpeg",
         "gif",
         "webp",
+        "mp4",
+        "webm",
+        "mov",
         "pdf",
         "docx",
         "xlsx",
@@ -217,6 +220,16 @@ def _extract_one_file(full: Path, display_name: str, ext: str) -> str:
 
     if ext in ("txt", "md", "csv", "json", "log", "py", "html", "htm", "xml"):
         return _read_plain_text(full)
+
+    if ext in ("mp4", "webm", "mov"):
+        try:
+            sz = full.stat().st_size
+        except OSError:
+            sz = 0
+        return (
+            f"（视频附件，约 {sz // 1024} KB；可用动作 media_summarize，params.path 填相对工作区路径 "
+            f"如 data/artifacts/uploads/.../文件名.{ext}，需本机 ffmpeg 抽帧或多模态模型。）"
+        )
 
     return "（未实现该类型的文本抽取）"
 

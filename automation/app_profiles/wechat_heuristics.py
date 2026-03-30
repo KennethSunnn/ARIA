@@ -25,10 +25,14 @@ def _defaults() -> dict[str, Any]:
             "说一下",
             "留言",
             "发一条",
+            "发个消息",
+            "发条消息",
             "替我发",
             "帮我发",
             "用微信发",
             "微信上发",
+            "在微信里发",
+            "微信里发",
         ],
         "guard_send_keywords": [
             "发消息",
@@ -112,7 +116,9 @@ def wechat_send_or_open_intent(text: str) -> bool:
     sends = tr.get("send_intent_keywords") or _defaults()["send_intent_keywords"]
     if any(k in t for k in sends):
         return True
-    if re.search(r"给\s*[^\s，,。:：]{1,24}\s*发", t):
+    if re.search(r"给\s*.{1,48}?\s*发", t):
+        return True
+    if re.search(r"(?:消息|微信|信息)\s*给\s*[^\s，,。:：;；]{1,48}\s*[：:]", t):
         return True
     if ("打开" in t or "点开" in t) and ("聊天" in t or "对话" in t or "会话" in t):
         return True
@@ -158,7 +164,9 @@ def heuristic_plan_wechat(
     send_kw = tr.get("send_intent_keywords") or _defaults()["send_intent_keywords"]
     send_intent = any(k in t for k in send_kw) or bool(
         re.search(r"给\s*[^\s，,。:：]{1,24}\s*发", t)
-    ) or "发给" in t or ("发送" in t and ("微信" in t or "消息" in t))
+    ) or "发给" in t or ("发送" in t and ("微信" in t or "消息" in t)) or bool(
+        re.search(r"发\s*(?:个|一(?:条)?)?(?:消息|微信|信息)\s*给\s*", t)
+    )
 
     open_only = ("打开" in t and ("聊天" in t or "对话" in t) and not send_intent) or (
         any(k in t for k in ("打开与", "点开")) and not send_intent
@@ -168,9 +176,28 @@ def heuristic_plan_wechat(
         return None
 
     contact = ""
-    m = re.search(r"给\s*([^\s，,。:：;；]{1,32}?)\s*(?:发|说|告诉|通知|留言|私聊)", t)
+    piped_message = ""
+    # 「在微信里发个消息给Kenneth：今天天气不错」——联系人后是冒号而非「发」
+    m_pipe = re.search(
+        r"发\s*(?:个|一(?:条)?)?(?:消息|微信|信息)\s*给\s*"
+        r"([^\s，,。:：;；]{1,48}(?:\s+[^\s，,。:：;；]{1,48}){0,2})\s*"
+        r"[：:]\s*(.+)$",
+        t,
+    )
+    if m_pipe:
+        contact = m_pipe.group(1).strip().strip("的")
+        piped_message = m_pipe.group(2).strip()
+    # 联系人名用「非空白片段 + 可选中间名」匹配，避免 \w 含汉字时把「发一条消息」吃进联系人。
+    m = re.search(
+        r"给\s*([^\s，,。:：;；]{1,48}(?:\s+[^\s，,。:：;；]{1,48}){0,2})\s*发(?:一条)?(?:消息|微信|信息)?",
+        t,
+    )
     if m:
         contact = m.group(1).strip().strip("的")
+    if not contact:
+        m0 = re.search(r"给\s*([^\s，,。:：;；]{1,32}?)\s*(?:发|说|告诉|通知|留言|私聊)", t)
+        if m0:
+            contact = m0.group(1).strip().strip("的")
     if not contact:
         m2 = re.search(r"发给\s*([^\s，,。:：;；]{1,32})", t)
         if m2:
@@ -191,7 +218,7 @@ def heuristic_plan_wechat(
         if m4:
             contact = m4.group(1).strip()
 
-    message = ""
+    message = piped_message
     mq = re.search(r"[「\"]([^」\"]{1,4000})[」\"]", t)
     if mq:
         message = mq.group(1).strip()
@@ -203,6 +230,18 @@ def heuristic_plan_wechat(
         mq3 = re.search(r"发(?:消息|微信|信息)?[：:]\s*(.+)$", t)
         if mq3:
             message = mq3.group(1).strip()
+    if not message:
+        mq_fa = re.search(r"发给\s*.+?[：:]\s*(.+)$", t)
+        if mq_fa:
+            message = mq_fa.group(1).strip()
+    if not message:
+        mq_say = re.search(r"发(?:一条)?(?:消息|微信|信息)?\s*说\s*(.+)$", t)
+        if mq_say:
+            message = mq_say.group(1).strip()
+    if not message:
+        mq_say2 = re.search(r"(?:私信|留言)\s*说\s*(.+)$", t)
+        if mq_say2:
+            message = mq_say2.group(1).strip()
 
     if open_only:
         if not contact:
