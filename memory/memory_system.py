@@ -480,6 +480,8 @@ class LongTermMemory:
     
     def add_methodology(self, methodology, keywords=None, solve_steps=None):
         """添加方法论，包含相似度检测和去重机制"""
+        # 同进程可能存在多个 LTM 实例，写入前先从磁盘同步，避免将已删除数据写回。
+        self.load()
         # 兼容旧调用：add_methodology(scene, keywords, solve_steps)
         if not isinstance(methodology, dict):
             methodology = {
@@ -642,22 +644,38 @@ class LongTermMemory:
         return [self._normalize_methodology(m) for m in (self.methodologies or []) if isinstance(m, dict)]
 
     def delete_methodology(self, method_id):
+        self.load()
         mid = str(method_id or "").strip()
         if not mid:
             return False
         before = len(self.methodologies)
-        self.methodologies = [m for m in self.methodologies if str((m or {}).get("method_id", "")) != mid]
+        self.methodologies = [
+            m
+            for m in self.methodologies
+            if (
+                str((m or {}).get("method_id", "")).strip() != mid
+                and str((m or {}).get("id", "")).strip() != mid
+            )
+        ]
         changed = len(self.methodologies) != before
         if changed:
             self.save()
         return changed
 
     def delete_methodologies_batch(self, method_ids: list[str]):
+        self.load()
         ids = {str(i).strip() for i in (method_ids or []) if str(i).strip()}
         if not ids:
             return {"success": False, "deleted_count": 0, "remaining_count": len(self.methodologies)}
         before = len(self.methodologies)
-        self.methodologies = [m for m in self.methodologies if str((m or {}).get("method_id", "")) not in ids]
+        self.methodologies = [
+            m
+            for m in self.methodologies
+            if (
+                str((m or {}).get("method_id", "")).strip() not in ids
+                and str((m or {}).get("id", "")).strip() not in ids
+            )
+        ]
         deleted = before - len(self.methodologies)
         if deleted > 0:
             self.save()

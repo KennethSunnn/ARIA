@@ -1,0 +1,65 @@
+{
+  "generated_at": "2026-03-31 10:34:38",
+  "total_cases": 4,
+  "matched_cases": 3,
+  "strict_passed_cases": 0,
+  "match_rate": 0.75,
+  "strict_pass_rate": 0.0,
+  "rows": [
+    {
+      "name": "browser_search_python",
+      "mode": "action",
+      "risk_level": "medium",
+      "actions": [
+        "browser_open",
+        "browser_click"
+      ],
+      "expected_hit": 2,
+      "expected_total": 3,
+      "mode_ok": true,
+      "risk_ok": false,
+      "hit_ok": true,
+      "strict_ok": false
+    },
+    {
+      "name": "wechat_send_message",
+      "mode": "action",
+      "risk_level": "medium",
+      "actions": [
+        "wechat_send_message"
+      ],
+      "expected_hit": 1,
+      "expected_total": 1,
+      "mode_ok": true,
+      "risk_ok": false,
+      "hit_ok": true,
+      "strict_ok": false
+    },
+    {
+      "name": "file_organize_pdf",
+      "mode": "action",
+      "risk_level": "medium",
+      "actions": [
+        "file_move"
+      ],
+      "expected_hit": 1,
+      "expected_total": 1,
+      "mode_ok": true,
+      "risk_ok": false,
+      "hit_ok": true,
+      "strict_ok": false
+    },
+    {
+      "name": "desktop_hotkey_demo",
+      "mode": "clarify",
+      "risk_level": "safe",
+      "actions": [],
+      "expected_hit": 0,
+      "expected_total": 2,
+      "mode_ok": false,
+      "risk_ok": true,
+      "hit_ok": false,
+      "strict_ok": false
+    }
+  ]
+}

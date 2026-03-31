@@ -3,9 +3,11 @@ import os
 import sys
 import time
 import json
+import re
 import queue
 import threading
 import uuid
+import mimetypes
 from dotenv import load_dotenv
 
 # 加载环境变量（强制覆盖同名系统变量，避免读取到空值）
@@ -104,6 +106,9 @@ manager.set_event_sink(publish_workflow_event)
 
 # 大模型 API：仅从环境变量 / .env 读取（不在 Web 中保存密钥，便于开源部署）
 _DOTENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+_REGRESSION_REPORT_PATH = os.path.join(_PROJECT_ROOT, "data", "benchmarks", "latest_regression_report.json")
+_EXPERIENCE_METRICS_PATH = os.path.join(_PROJECT_ROOT, "data", "experience_center_metrics.json")
 
 
 def resolve_api_key() -> str:
@@ -113,6 +118,196 @@ def resolve_api_key() -> str:
 
 def _empty_token_usage() -> dict:
     return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "llm_calls": 0}
+
+
+def _safe_read_json(path: str, default: Any):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception:
+        return default
+
+
+def _safe_write_json(path: str, payload: Any):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _load_regression_snapshot() -> dict:
+    data = _safe_read_json(_REGRESSION_REPORT_PATH, {})
+    if not isinstance(data, dict):
+        return {"available": False, "match_rate": 0.0, "strict_pass_rate": 0.0, "total_cases": 0}
+    total = int(data.get("total_cases", 0) or 0)
+    matched = int(data.get("matched_cases", 0) or 0)
+    strict = int(data.get("strict_passed_cases", matched) or matched)
+    match_rate = float(data.get("match_rate", 0.0) or 0.0)
+    strict_rate = float(data.get("strict_pass_rate", strict / max(1, total)) or (strict / max(1, total)))
+    return {
+        "available": total > 0,
+        "match_rate": round(match_rate, 4),
+        "strict_pass_rate": round(strict_rate, 4),
+        "total_cases": total,
+        "matched_cases": matched,
+        "strict_passed_cases": strict,
+        "generated_at": data.get("generated_at") or "",
+    }
+
+
+def _method_health_index(limit: int = 300) -> dict[str, dict]:
+    rows = methodology_manager.get_methodology_health_dashboard(limit=limit)
+    out: dict[str, dict] = {}
+    for row in rows:
+        if isinstance(row, dict):
+            mid = str(row.get("method_id") or "").strip()
+            if mid:
+                out[mid] = row
+    return out
+
+
+def _calc_recommendation_score(method: dict, health: dict, regression: dict) -> float:
+    usage = float(method.get("usage_count", 0) or 0)
+    success = float(method.get("success_count", 0) or 0)
+    score = float(method.get("score", 0.0) or 0.0)
+    health_sr = float(health.get("success_rate", 0.0) or 0.0)
+    quality = float(health.get("quality_score_avg", 0.0) or 0.0)
+    recency_bonus = 0.08 if str(health.get("last_outcome_at") or "").strip() else 0.0
+    utilization = min(1.0, usage / 10.0)
+    base = 0.40 * score + 0.25 * health_sr + 0.20 * quality + 0.15 * utilization
+    if usage > 0 and success <= 0:
+        base *= 0.7
+    if regression.get("available") and float(regression.get("strict_pass_rate", 0.0) or 0.0) < 0.45:
+        base *= 0.9
+    return round(max(0.0, min(1.0, base + recency_bonus)), 4)
+
+
+def _health_label(reco_score: float) -> str:
+    if reco_score >= 0.72:
+        return "stable"
+    if reco_score >= 0.48:
+        return "caution"
+    return "deprecate"
+
+
+def _build_skill_card(method: dict, health: dict, regression: dict) -> dict:
+    mid = str(method.get("method_id") or "")
+    title = str(method.get("title") or method.get("scene") or "未命名经验")
+    scene = str(method.get("scene") or method.get("scenario") or "")
+    keywords = method.get("keywords") if isinstance(method.get("keywords"), list) else []
+    score = _calc_recommendation_score(method, health, regression)
+    label = _health_label(score)
+    strict_rate = float(regression.get("strict_pass_rate", 0.0) or 0.0)
+    return {
+        "method_id": mid,
+        "title": title,
+        "scene": scene,
+        "keywords": keywords[:8],
+        "category": str(method.get("category") or "通用/其他"),
+        "success_rate": round(float(health.get("success_rate", 0.0) or 0.0), 4),
+        "quality_score_avg": round(float(health.get("quality_score_avg", 0.0) or 0.0), 4),
+        "recent_regression_pass": bool(regression.get("available")) and strict_rate >= 0.6,
+        "risk_hint": "可放心复用" if label == "stable" else ("建议人工确认" if label == "caution" else "建议下线/重写"),
+        "health_label": label,
+        "recommendation_score": score,
+        "last_outcome_at": str(health.get("last_outcome_at") or ""),
+        "usage_count": int(method.get("usage_count", 0) or 0),
+        "success_count": int(method.get("success_count", 0) or 0),
+    }
+
+
+def _extract_keywords_from_text(text: str, limit: int = 6) -> list[str]:
+    txt = str(text or "").strip().lower()
+    if not txt:
+        return []
+    parts = re.split(r"[\s,，;；/|、]+", txt)
+    dedup: list[str] = []
+    for p in parts:
+        token = p.strip()
+        if not token:
+            continue
+        if token in dedup:
+            continue
+        if len(token) <= 1:
+            continue
+        dedup.append(token)
+        if len(dedup) >= limit:
+            break
+    return dedup
+
+
+def _recent_success_summaries(limit: int = 8) -> list[dict]:
+    rows: list[dict] = []
+    conversations = conversation_manager._load()
+    conversations.sort(key=lambda c: float(c.get("updated_at", 0) or 0), reverse=True)
+    for conv in conversations:
+        cid = str(conv.get("conversation_id") or "")
+        title = str(conv.get("title") or "新会话")
+        messages = conv.get("messages") if isinstance(conv.get("messages"), list) else []
+        if not messages:
+            continue
+        latest_user = ""
+        latest_assistant = ""
+        session_id = ""
+        for msg in reversed(messages):
+            if not isinstance(msg, dict):
+                continue
+            role = str(msg.get("role") or "").strip().lower()
+            content = str(msg.get("content") or "").strip()
+            meta = msg.get("meta") if isinstance(msg.get("meta"), dict) else {}
+            if role == "assistant" and not latest_assistant:
+                latest_assistant = content
+                session_id = str(meta.get("execution_session_id") or "")
+            if role == "user" and not latest_user:
+                latest_user = content
+            if latest_user and latest_assistant:
+                break
+        if not latest_user:
+            continue
+        rows.append(
+            {
+                "conversation_id": cid,
+                "title": title,
+                "latest_user": latest_user,
+                "latest_assistant": latest_assistant,
+                "execution_session_id": session_id,
+                "updated_at": float(conv.get("updated_at", 0) or 0),
+            }
+        )
+        if len(rows) >= max(1, min(30, int(limit))):
+            break
+    return rows
+
+
+def _build_skill_draft_from_recent(summary: dict) -> dict:
+    title = str(summary.get("title") or "新技能草稿").strip()
+    latest_user = str(summary.get("latest_user") or "").strip()
+    assistant = str(summary.get("latest_assistant") or "").strip()
+    scene = latest_user[:80] if latest_user else title
+    keywords = _extract_keywords_from_text(scene, limit=6)
+    if not keywords:
+        keywords = _extract_keywords_from_text(title, limit=6)
+    steps = [
+        "确认输入目标与边界条件",
+        "按已有流程生成可执行动作计划",
+        "执行后记录结果并做质量复盘",
+    ]
+    if assistant:
+        steps.append("参考最近一次执行摘要优化步骤细节")
+    return {
+        "title": f"{title} - Skill 草稿",
+        "scene": scene,
+        "keywords": keywords,
+        "solve_steps": steps,
+        "category": "通用/其他",
+        "applicable_range": "任务提效",
+        "status": "draft",
+        "quality_metrics": {"source": "recent_success_bootstrap"},
+        "evidence_refs": [{"conversation_id": str(summary.get("conversation_id") or "")}],
+    }
 
 
 def _json_response(data: dict) -> Response:
@@ -229,6 +424,29 @@ def workspace_file():
         return jsonify({'success': False, 'message': 'read_error'}), 500
 
 
+@app.route('/api/workspace_asset', methods=['GET'])
+def workspace_asset():
+    """预览 ARIA 工作区内附件（用于聊天消息中的图片缩略图/文件直链）。"""
+    raw = (request.args.get('path') or '').strip().replace('\\', '/')
+    if not raw or '..' in raw or raw.startswith('/'):
+        return jsonify({'success': False, 'message': 'invalid_path'}), 400
+    try:
+        p = manager._ensure_safe_path(raw)
+        if not p.is_file():
+            return jsonify({'success': False, 'message': 'not_found'}), 404
+        guessed, _ = mimetypes.guess_type(str(p))
+        return send_file(
+            str(p),
+            as_attachment=False,
+            mimetype=guessed or 'application/octet-stream',
+            conditional=True,
+        )
+    except ValueError:
+        return jsonify({'success': False, 'message': 'path_not_allowed'}), 403
+    except Exception:
+        return jsonify({'success': False, 'message': 'read_error'}), 500
+
+
 # 首页
 @app.route('/')
 def index():
@@ -305,11 +523,6 @@ def process_input():
     attachment_excerpt = extract_llm_excerpt(manager, attachment_records) if attachment_records else ""
     user_plain = (user_input or "").strip()
     display_user_content = user_plain
-    if attachment_records:
-        names = ", ".join(str(r.get("name") or "") for r in attachment_records)
-        display_user_content = (
-            (display_user_content + "\n\n" if display_user_content else "") + f"[附件 {len(attachment_records)} 个: {names}]"
-        )
     llm_user_input = user_plain
     if attachment_excerpt:
         llm_user_input = (
@@ -433,9 +646,8 @@ def process_input():
             if _is_confirmation_text(user_input or ""):
                 pending_risk_level = str(pending.get("risk_level") or manager.evaluate_action_risk_level(actions))
                 if pending_risk_level == "high":
-                    pending["double_confirm_ready"] = True
                     pending_action_plans[conversation_id] = pending
-                    msg = "检测到高风险动作。请回复“二次确认”后执行。"
+                    msg = "检测到高风险动作。请点击确认按钮完成二次确认（不再使用输入文字二次确认）。"
                     manager.push_event("action_double_confirm_required", "warning", "TaskParser", msg)
                     manager.push_log("TaskParser", msg, "warning")
                     logs = manager.get_execution_log()
@@ -476,20 +688,6 @@ def process_input():
                         actions,
                         plan_summary=str(pending.get("summary") or ""),
                         plan_risk_level=str(pending.get("risk_level") or "medium"),
-                        thread_task_id=tid,
-                        action_screenshots=action_screenshots,
-                    )
-                )
-
-            if _is_double_confirmation_text(user_input or "") and pending.get("double_confirm_ready"):
-                pending_action_plans.pop(conversation_id, None)
-                return jsonify(
-                    _finalize_action_execution(
-                        conversation_id,
-                        request_id or "",
-                        actions,
-                        plan_summary=str(pending.get("summary") or ""),
-                        plan_risk_level=str(pending.get("risk_level") or "high"),
                         thread_task_id=tid,
                         action_screenshots=action_screenshots,
                     )
@@ -1051,12 +1249,23 @@ def update_methodology_category():
 # 创建方法论
 @app.route('/api/create_methodology', methods=['POST'])
 def create_methodology():
-    data = request.json
-    scene = data.get('scene')
-    keywords = data.get('keywords', [])
-    solve_steps = data.get('solve_steps', [])
-    methodology = methodology_manager.add_methodology(scene, keywords, solve_steps)
-    return jsonify({'methodology_id': methodology['method_id']})
+    data = request.json or {}
+    if isinstance(data.get("methodology"), dict):
+        payload = dict(data.get("methodology") or {})
+    else:
+        payload = {
+            "scene": data.get("scene"),
+            "keywords": data.get("keywords", []),
+            "solve_steps": data.get("solve_steps", []),
+            "title": data.get("title", ""),
+            "category": data.get("category", ""),
+            "applicable_range": data.get("applicable_range", "通用"),
+            "status": data.get("status", "published"),
+            "quality_metrics": data.get("quality_metrics", {}),
+            "evidence_refs": data.get("evidence_refs", []),
+        }
+    methodology = methodology_manager.add_methodology(payload)
+    return jsonify({'methodology_id': methodology['method_id'], "methodology": methodology, "success": True})
 
 # 获取方法论详情
 @app.route('/api/get_methodology', methods=['POST'])
@@ -1087,6 +1296,139 @@ def methodology_health():
     dashboard = methodology_manager.get_methodology_health_dashboard(limit=limit)
     summary = methodology_manager.get_ab_stats_summary()
     return jsonify({"rows": dashboard, "summary": summary, "success": True})
+
+
+@app.route('/api/experience_hub_data', methods=['GET'])
+def experience_hub_data():
+    try:
+        limit = int(request.args.get("limit", "60") or "60")
+    except ValueError:
+        limit = 60
+    methods = methodology_manager.get_all_methodologies()
+    health_map = _method_health_index(limit=max(limit, 300))
+    regression = _load_regression_snapshot()
+    cards = []
+    for method in methods:
+        if not isinstance(method, dict):
+            continue
+        mid = str(method.get("method_id") or "")
+        health = health_map.get(mid, {})
+        cards.append(_build_skill_card(method, health, regression))
+    cards.sort(key=lambda x: (float(x.get("recommendation_score", 0.0) or 0.0), int(x.get("usage_count", 0) or 0)), reverse=True)
+    top_limit = max(4, min(30, limit // 2))
+    alerts: list[dict] = []
+    if regression.get("available"):
+        strict = float(regression.get("strict_pass_rate", 0.0) or 0.0)
+        if strict < 0.6:
+            alerts.append({"type": "regression", "level": "warning", "message": f"回归严格通过率偏低：{strict:.0%}，建议谨慎复用低分技能"})
+        elif strict >= 0.85:
+            alerts.append({"type": "regression", "level": "success", "message": f"回归严格通过率稳定：{strict:.0%}"})
+    deprecate_count = sum(1 for c in cards if c.get("health_label") == "deprecate")
+    if deprecate_count > 0:
+        alerts.append({"type": "quality", "level": "warning", "message": f"发现 {deprecate_count} 条低健康经验，建议回滚或重写"})
+    payload = {
+        "success": True,
+        "recommended_skills": cards[:top_limit],
+        "all_skill_cards": cards[: max(1, min(300, limit))],
+        "recent_successes": _recent_success_summaries(limit=8),
+        "alerts": alerts,
+        "regression": regression,
+    }
+    return jsonify(payload)
+
+
+@app.route('/api/experience_recent_successes', methods=['GET'])
+def experience_recent_successes():
+    try:
+        limit = int(request.args.get("limit", "8") or "8")
+    except ValueError:
+        limit = 8
+    return jsonify({"success": True, "rows": _recent_success_summaries(limit=limit)})
+
+
+@app.route('/api/create_skill_draft_from_recent', methods=['POST'])
+def create_skill_draft_from_recent():
+    data = request.json or {}
+    conversation_id = str(data.get("conversation_id") or "").strip()
+    rows = _recent_success_summaries(limit=30)
+    picked = None
+    if conversation_id:
+        picked = next((r for r in rows if str(r.get("conversation_id") or "") == conversation_id), None)
+    if picked is None and rows:
+        picked = rows[0]
+    if not picked:
+        return jsonify({"success": False, "message": "没有可用于生成草稿的近期成功任务"}), 404
+    draft = _build_skill_draft_from_recent(picked)
+    return jsonify({"success": True, "draft": draft, "source": picked})
+
+
+@app.route('/api/import_methodologies', methods=['POST'])
+def import_methodologies():
+    data = request.json or {}
+    items = data.get("items")
+    if not isinstance(items, list):
+        return jsonify({"success": False, "message": "items 必须为数组"}), 400
+    existing = methodology_manager.get_all_methodologies()
+    existing_keys = {str(m.get("event_key") or "").strip() for m in existing if isinstance(m, dict)}
+    imported = 0
+    skipped = 0
+    errors: list[dict] = []
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            skipped += 1
+            errors.append({"index": idx, "message": "非对象条目，已跳过"})
+            continue
+        scene = str(item.get("scene") or "").strip()
+        steps = item.get("solve_steps") if isinstance(item.get("solve_steps"), list) else []
+        if not scene and not steps:
+            skipped += 1
+            errors.append({"index": idx, "message": "缺少 scene/solve_steps"})
+            continue
+        normalized_preview = methodology_manager.normalize_methodology(item)
+        event_key = str(normalized_preview.get("event_key") or "").strip()
+        if event_key and event_key in existing_keys:
+            skipped += 1
+            errors.append({"index": idx, "message": f"重复 event_key: {event_key}"})
+            continue
+        created = methodology_manager.add_methodology(item)
+        if created and isinstance(created, dict):
+            imported += 1
+            ek = str(created.get("event_key") or "").strip()
+            if ek:
+                existing_keys.add(ek)
+        else:
+            skipped += 1
+            errors.append({"index": idx, "message": "创建失败"})
+    return jsonify({"success": True, "imported": imported, "skipped": skipped, "errors": errors})
+
+
+@app.route('/api/experience_metrics/event', methods=['POST'])
+def experience_metrics_event():
+    data = request.json or {}
+    event_name = str(data.get("event") or "").strip()
+    if not event_name:
+        return jsonify({"success": False, "message": "missing event"}), 400
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    stats = _safe_read_json(_EXPERIENCE_METRICS_PATH, {})
+    if not isinstance(stats, dict):
+        stats = {}
+    counters = stats.get("counters") if isinstance(stats.get("counters"), dict) else {}
+    counters[event_name] = int(counters.get(event_name, 0) or 0) + 1
+    history = stats.get("recent_events") if isinstance(stats.get("recent_events"), list) else []
+    history.append(
+        {
+            "event": event_name,
+            "method_id": str(data.get("method_id") or ""),
+            "conversation_id": str(data.get("conversation_id") or ""),
+            "at": now,
+        }
+    )
+    history = history[-200:]
+    stats["counters"] = counters
+    stats["recent_events"] = history
+    stats["updated_at"] = now
+    _safe_write_json(_EXPERIENCE_METRICS_PATH, stats)
+    return jsonify({"success": True, "counters": counters, "updated_at": now})
 
 # 获取记忆状态
 @app.route('/api/get_memory_status')

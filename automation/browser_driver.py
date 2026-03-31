@@ -307,6 +307,133 @@ def press_key(key: str, selector: str | None = None, timeout_ms: int | None = No
             return False, str(e)
 
 
+def click_by_text(text: str, timeout_ms: int | None = None) -> tuple[bool, str]:
+    """当 selector 不稳定时，通过页面可见文本点击首个匹配元素。"""
+    t = (text or "").strip()
+    if not t:
+        return False, "missing_text"
+    if timeout_ms is None:
+        timeout_ms = default_timeout_ms(20_000)
+    ok, err = ensure_session()
+    if not ok:
+        return False, err
+    with _lock:
+        try:
+            assert _page is not None
+            # Playwright 内建文本定位，适合兜底场景
+            loc = _page.get_by_text(t, exact=False).first
+            loc.click(timeout=timeout_ms)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+
+
+def fill_by_related_text(label_text: str, value: str, timeout_ms: int | None = None) -> tuple[bool, str]:
+    """
+    兜底输入：优先按标签文本关联输入框，不行再按 placeholder/aria-label 模糊匹配。
+    """
+    label = (label_text or "").strip()
+    if not label:
+        return False, "missing_label_text"
+    if timeout_ms is None:
+        timeout_ms = default_timeout_ms(20_000)
+    ok, err = ensure_session()
+    if not ok:
+        return False, err
+    with _lock:
+        try:
+            assert _page is not None
+            # 1) 语义标签
+            try:
+                _page.get_by_label(label, exact=False).first.fill(value, timeout=timeout_ms)
+                return True, ""
+            except Exception:
+                pass
+            # 2) placeholder / aria-label
+            candidates = [
+                f"input[placeholder*='{label}']",
+                f"textarea[placeholder*='{label}']",
+                f"input[aria-label*='{label}']",
+                f"textarea[aria-label*='{label}']",
+            ]
+            for sel in candidates:
+                try:
+                    el = _page.query_selector(sel)
+                    if el:
+                        el.fill(value, timeout=timeout_ms)
+                        return True, ""
+                except Exception:
+                    continue
+            # 3) 兜底首个可编辑输入框
+            try:
+                el = _page.query_selector("input, textarea, [contenteditable='true']")
+                if el:
+                    el.fill(value, timeout=timeout_ms)
+                    return True, ""
+            except Exception:
+                pass
+            return False, "no_related_input_found"
+        except Exception as e:
+            return False, str(e)
+
+
+def find_by_text(text: str, timeout_ms: int | None = None) -> tuple[bool, list[dict], str]:
+    """基于文本语义查找页面元素，返回前若干命中项。"""
+    t = (text or "").strip()
+    if not t:
+        return False, [], "missing_text"
+    if timeout_ms is None:
+        timeout_ms = default_timeout_ms(10_000)
+    ok, err = ensure_session()
+    if not ok:
+        return False, [], err
+    with _lock:
+        try:
+            assert _page is not None
+            loc = _page.get_by_text(t, exact=False)
+            n = min(loc.count(), 20)
+            rows: list[dict] = []
+            for i in range(n):
+                try:
+                    item = loc.nth(i)
+                    txt = (item.inner_text(timeout=timeout_ms) or "").strip()
+                    box = item.bounding_box() or {}
+                    rows.append(
+                        {
+                            "index": i,
+                            "text": txt[:120],
+                            "x": box.get("x", 0),
+                            "y": box.get("y", 0),
+                            "width": box.get("width", 0),
+                            "height": box.get("height", 0),
+                        }
+                    )
+                except Exception:
+                    continue
+            return True, rows, ""
+        except Exception as e:
+            return False, [], str(e)
+
+
+def wait_for_text(text: str, timeout_ms: int | None = None) -> tuple[bool, str]:
+    """等待页面出现目标文本（可见）。"""
+    t = (text or "").strip()
+    if not t:
+        return False, "missing_text"
+    if timeout_ms is None:
+        timeout_ms = default_timeout_ms(30_000)
+    ok, err = ensure_session()
+    if not ok:
+        return False, err
+    with _lock:
+        try:
+            assert _page is not None
+            _page.get_by_text(t, exact=False).first.wait_for(state="visible", timeout=timeout_ms)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+
+
 def playwright_package_installed() -> bool:
     try:
         import playwright  # noqa: F401

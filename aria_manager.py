@@ -22,6 +22,7 @@ import requests
 
 from automation import browser_driver
 from automation import desktop_uia
+from automation import interaction_intelligence
 from automation import wechat_driver
 from automation import screen_ocr
 from automation.app_profiles import wechat_heuristics
@@ -49,6 +50,18 @@ _MATH_NOTATION_FOR_CHAT = (
     "需要时用常见 Unicode（如 ² ³ × ÷）或「a/b」「根号下…」等口语化写法，让读者不看符号约定也能读懂。"
     "若仍需严谨记法，在直观说明之后单独用一行「参考记法：」写出；避免正文大段只有 $...$、\\boxed、\\mathrm 等 LaTeX 源码（除非用户明确要求交 LaTeX 源码）。"
 )
+
+
+def format_wechat_need_disambiguation_message(candidates: list[str] | None) -> str:
+    """
+    将“同名消歧”错误候选转为给用户看的追问文案。
+    该函数尽量保持稳定输出，方便回归 sanity 检查。
+    """
+    cs = [str(c) for c in (candidates or []) if str(c).strip()]
+    if cs:
+        lines = "\n".join([f"{i+1}) {c}" for i, c in enumerate(cs[:6])])
+        return f"需要消歧：找到多个匹配对象，请回复你要发送的选项序号（或直接回复完整名称/备注）。\n{lines}"
+    return "需要消歧：找到多个匹配对象，请补充接收人显示名/备注名/微信号等以便定位。"
 
 
 def _windows_desktop_path_bonus(p: Path) -> int:
@@ -432,6 +445,7 @@ class ARIAManager:
         env_model = (os.getenv("MODEL_NAME") or "").strip()
         pool_model = str(self.model_pool.get("llm") or "").strip()
         self.unified_model = env_model or pool_model or str(getattr(self.llm, "model_name", "") or "").strip() or "doubao-seed-2-0-lite-260215"
+        self.interaction_core = interaction_intelligence.InteractionIntelligenceCore()
         
         # 初始化三级记忆
         self.stm = ShortTermMemory()  # 短期记忆
@@ -2004,6 +2018,7 @@ class ARIAManager:
                     "字段："
                     "intent_send(布尔)，"
                     "contact_name(字符串，会话列表/聊天顶栏显示的名称，不确定则空)，"
+                    "contact_hint(字符串，消歧提示，如备注名/微信号/群标识，不确定则空)，"
                     "message(字符串，要发出的正文，不含操纵类客套句)，"
                     "is_enterprise(布尔，是否企业微信/企微)，"
                     "confidence(0到1的小数，对收件人与正文判断的把握)。"
@@ -2025,6 +2040,7 @@ class ARIAManager:
             return None
         contact = str(data.get("contact_name") or "").strip()
         message = str(data.get("message") or "").strip()
+        contact_hint = str(data.get("contact_hint") or "").strip()
         is_ent = data.get("is_enterprise")
         is_enterprise = is_ent is True or str(is_ent).strip().lower() in ("1", "true", "yes")
         try:
@@ -2043,6 +2059,7 @@ class ARIAManager:
                 "contact_name": contact,
                 "message": message,
                 "is_enterprise": is_enterprise,
+                "contact_hint": contact_hint,
             },
             "risk": "medium",
             "reason": "由语义抽槽得到的微信发送动作（须用户确认后执行）",
@@ -2286,7 +2303,7 @@ class ARIAManager:
         result.setdefault("retryable", bool(result.get("success") is False))
         result.setdefault("needs_manual_takeover", False)
         result["verification"] = self._verify_action_result(action_type, action, result)
-        return result
+        return self.interaction_core.normalize_result(action_type, result)
 
     def execute_actions(
         self,
@@ -2300,6 +2317,8 @@ class ARIAManager:
         merged = self._normalize_redundant_actions(list(actions or []))
         bounded_actions = merged[: self.max_action_steps]
         for idx, action in enumerate(bounded_actions, start=1):
+            if self.is_cancelled(request_id):
+                break
             raw_type = str(action.get("type") or "")
             action_type = self._normalize_action_type_alias(raw_type)
             handler = self.action_registry.get(action_type)
@@ -2318,6 +2337,11 @@ class ARIAManager:
                 "stderr": "",
                 "artifacts": [],
                 "screenshots": [],
+                "strategy_path": "rule_path",
+                "confidence": 0.0,
+                "safe_block_reason": "",
+                "fallback_used": False,
+                "decision_trace": [],
             }
             if not handler:
                 row["stderr"] = "unsupported_action"
@@ -2334,8 +2358,15 @@ class ARIAManager:
                 {"step_id": idx, "action_type": action_type, "input": action},
             )
             try:
-                result = handler(action, conversation_id, methodology_manager, conversation_manager)
+                action_ctx = dict(action)
+                action_ctx["_request_id"] = request_id
+                result = handler(action_ctx, conversation_id, methodology_manager, conversation_manager)
                 base = result if isinstance(result, dict) else {"success": True, "output": result}
+                # 统一内核：规则失败后，浏览器动作自动尝试文本语义兜底。
+                if self.interaction_core.should_try_browser_fallback(action_type, action, base):
+                    fb = self.interaction_core.try_browser_fallback(action_type, action, base)
+                    if isinstance(fb, dict):
+                        base = fb
                 row["result"] = self._normalize_action_result(action_type, action, base)
                 row["status"] = "success" if row["result"].get("success") is not False else "error"
                 row["error_code"] = str(row["result"].get("error_code") or "")
@@ -2346,6 +2377,14 @@ class ARIAManager:
                 row["stderr"] = str(row["result"].get("stderr") or "")
                 row["artifacts"] = row["result"].get("artifacts") or []
                 row["screenshots"] = row["result"].get("screenshots") or []
+                row["strategy_path"] = str(row["result"].get("strategy_path") or "rule_path")
+                try:
+                    row["confidence"] = float(row["result"].get("confidence", 0.0) or 0.0)
+                except Exception:
+                    row["confidence"] = 0.0
+                row["safe_block_reason"] = str(row["result"].get("safe_block_reason") or "")
+                row["fallback_used"] = bool(row["result"].get("fallback_used"))
+                row["decision_trace"] = row["result"].get("decision_trace") or []
             except Exception as e:
                 row["stderr"] = str(e)
                 row["error_code"] = "execution_exception"
@@ -2367,9 +2406,15 @@ class ARIAManager:
                     "stderr": row["stderr"][:300],
                     "artifacts": row["artifacts"],
                     "screenshots": row["screenshots"],
+                    "strategy_path": row["strategy_path"],
+                    "confidence": row["confidence"],
+                    "safe_block_reason": row["safe_block_reason"],
+                    "fallback_used": row["fallback_used"],
                 },
             )
             report.append(row)
+            if self.is_cancelled(request_id):
+                break
         success_count = sum(1 for r in report if r.get("status") == "success")
         unavailable_count = sum(
             1
@@ -2696,6 +2741,15 @@ class ARIAManager:
                             cur["token_usage"] = self.get_token_usage_summary()
                             return
                         is_paused = bool(cur.get("paused"))
+                    if self.is_cancelled(request_id):
+                        with self.execution_lock:
+                            cur2 = self.execution_sessions.get(session_id) or {}
+                            cur2["aborted"] = True
+                            cur2["status"] = "aborted"
+                            cur2["error"] = "request_cancelled_by_user"
+                            cur2["updated_at"] = time.time()
+                            cur2["token_usage"] = self.get_token_usage_summary()
+                        return
                     if not is_paused:
                         break
                     time.sleep(0.2)
@@ -2780,6 +2834,19 @@ class ARIAManager:
             sess = self.execution_sessions.get(session_id)
             if not sess:
                 return {"success": False, "message": "session_not_found"}
+            report = sess.get("report") or []
+            fallback_used_steps = sum(1 for r in report if bool(r.get("fallback_used")))
+            safe_block_steps = sum(1 for r in report if str(r.get("safe_block_reason") or "").strip())
+            avg_conf = 0.0
+            if report:
+                vals: list[float] = []
+                for r in report:
+                    try:
+                        vals.append(float(r.get("confidence", 0.0) or 0.0))
+                    except Exception:
+                        continue
+                if vals:
+                    avg_conf = sum(vals) / len(vals)
             return {
                 "success": True,
                 "session_id": session_id,
@@ -2789,12 +2856,17 @@ class ARIAManager:
                 "paused": sess.get("paused"),
                 "aborted": sess.get("aborted"),
                 "manual_takeover": sess.get("manual_takeover"),
-                "report": sess.get("report") or [],
+                "report": report,
                 "created_at": sess.get("created_at"),
                 "updated_at": sess.get("updated_at"),
                 "token_usage": sess.get("token_usage"),
                 "quality_metrics": sess.get("quality_metrics") or {},
                 "quality_score": sess.get("quality_score"),
+                "intelligence_metrics": {
+                    "fallback_used_steps": fallback_used_steps,
+                    "safe_block_steps": safe_block_steps,
+                    "avg_confidence": round(avg_conf, 4),
+                },
             }
 
     def _exec_kb_delete_all(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
@@ -3646,6 +3718,38 @@ class ARIAManager:
         web_alternative = None
         try:
             if os.name == "nt":
+                app_lower = app.lower()
+                is_wechat = ("微信" in app) or ("wechat" in app_lower) or ("weixin" in app_lower)
+                is_wxwork = ("企业微信" in app) or ("企微" in app) or ("wxwork" in app_lower)
+                # 避免“已开微信却再拉起一个实例”：先尝试连接并前置已有窗口。
+                if is_wechat or is_wxwork:
+                    try:
+                        router = wechat_driver.create_router(
+                            prefer_desktop=True,
+                            is_enterprise=bool(is_wxwork and not is_wechat),
+                        )
+                        desktop = getattr(router, "desktop", None)
+                        if desktop:
+                            ok_conn, _ = desktop.connect()
+                            if ok_conn:
+                                ok_focus, _ = desktop._activate_wechat_window(
+                                    max_attempts=4, allow_mouse_click=True, use_alt_trick=True
+                                )
+                                if ok_focus:
+                                    shots = self._capture_screenshot("desktop_open_app")
+                                    return {
+                                        "success": True,
+                                        "message": f"desktop_app_already_running:{app}",
+                                        "stdout": f"{app} 已在运行，已切换到现有窗口",
+                                        "artifacts": [],
+                                        "screenshots": shots,
+                                        "strategy_path": "rule_path",
+                                        "confidence": 0.95,
+                                        "fallback_used": False,
+                                    }
+                    except Exception:
+                        # 若复用现有窗口失败，再走原有启动流程
+                        pass
                 resolved, info = _windows_resolve_app_executable(app)
                 web_alternative = info.get("web_alternative")
                 if resolved is not None:
@@ -3664,12 +3768,23 @@ class ARIAManager:
                     "message": f"open_failed:{e}",
                     "web_alternative": web_alternative,
                     "suggestion": f"未找到 {app}，已为您准备网页版：{web_alternative}",
+                    "strategy_path": "rule_path",
+                    "confidence": 0.35,
+                    "safe_block_reason": "unresolved_target",
                 }
             raise ValueError(
                 f"open_failed:{e}（已尝试匹配桌面/开始菜单快捷方式与常见安装路径；仍失败请改用 .exe 完整路径）"
             ) from e
         shots = self._capture_screenshot("desktop_open_app")
-        return {"success": True, "message": f"desktop_app_opened:{launched}", "artifacts": [], "screenshots": shots}
+        return {
+            "success": True,
+            "message": f"desktop_app_opened:{launched}",
+            "artifacts": [],
+            "screenshots": shots,
+            "strategy_path": "rule_path",
+            "confidence": 0.9,
+            "fallback_used": False,
+        }
 
     def _exec_desktop_hotkey(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
         params = action.get("params") or {}
@@ -3742,6 +3857,9 @@ class ARIAManager:
                 "stderr": "missing_or_empty_steps",
                 "artifacts": [],
                 "screenshots": [],
+                "strategy_path": "rule_path",
+                "confidence": 0.2,
+                "safe_block_reason": "unsafe_to_continue",
             }
         shots = self._capture_screenshot("desktop_sequence")
         real = (
@@ -3766,6 +3884,9 @@ class ARIAManager:
                         "stderr": "empty_hotkey_step",
                         "artifacts": [],
                         "screenshots": shots,
+                        "strategy_path": "rule_path",
+                        "confidence": 0.25,
+                        "safe_block_reason": "unsafe_to_continue",
                     }
                 if real:
                     ok, err = desktop_uia.send_hotkey(hk)
@@ -3776,6 +3897,9 @@ class ARIAManager:
                             "stderr": err or "hotkey_failed",
                             "artifacts": [],
                             "screenshots": shots,
+                            "strategy_path": "rule_path",
+                            "confidence": 0.25,
+                            "safe_block_reason": "unsafe_to_continue",
                         }
                 log_parts.append(f"hotkey:{hk}")
             elif stype in ("type", "desktop_type", "text"):
@@ -3789,6 +3913,9 @@ class ARIAManager:
                             "stderr": err or "type_failed",
                             "artifacts": [],
                             "screenshots": shots,
+                            "strategy_path": "rule_path",
+                            "confidence": 0.25,
+                            "safe_block_reason": "unsafe_to_continue",
                         }
                 log_parts.append(f"type:{len(txt)}chars")
             else:
@@ -3798,6 +3925,9 @@ class ARIAManager:
                     "stderr": f"unknown_step_type:{stype}",
                     "artifacts": [],
                     "screenshots": shots,
+                    "strategy_path": "rule_path",
+                    "confidence": 0.2,
+                    "safe_block_reason": "unsafe_to_continue",
                 }
         out = ";".join(log_parts)
         if real:
@@ -3807,6 +3937,9 @@ class ARIAManager:
                 "stdout": out[:800],
                 "artifacts": [],
                 "screenshots": shots,
+                "strategy_path": "rule_path",
+                "confidence": 0.88,
+                "fallback_used": False,
             }
         return {
             "success": True,
@@ -3814,6 +3947,9 @@ class ARIAManager:
             "stdout": out[:800],
             "artifacts": [],
             "screenshots": shots,
+            "strategy_path": "rule_path",
+            "confidence": 0.6,
+            "fallback_used": False,
         }
 
     def _exec_wechat_send_message(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
@@ -3827,6 +3963,7 @@ class ARIAManager:
             is_enterprise: 是否为企业微信（默认 False）
         """
         params = action.get("params") or {}
+        request_id = str(action.get("_request_id") or self.current_request_id or "").strip()
         contact_name = str(
             params.get("contact_name")
             or params.get("contact")
@@ -3834,6 +3971,15 @@ class ARIAManager:
             or ""
         ).strip()
         message = str(params.get("message") or params.get("content") or "")
+        raw_contact_hint = (
+            params.get("contact_hint")
+            or params.get("hint")
+            or params.get("disambiguation_hint")
+            or ""
+        )
+        contact_hint = str(raw_contact_hint).strip()
+        if not contact_hint:
+            contact_hint = None
         use_desktop = params.get("use_desktop", True)
         is_enterprise = params.get("is_enterprise", False)
         raw_skip = params.get("skip_contact_search", params.get("skip_search", False))
@@ -3889,13 +4035,35 @@ class ARIAManager:
             }
         
         try:
+            if self.is_cancelled(request_id):
+                return {
+                    "success": False,
+                    "message": "request_cancelled",
+                    "stderr": "request_cancelled_by_user",
+                    "retryable": False,
+                    "artifacts": [],
+                    "screenshots": shots,
+                }
             # 创建路由器
             router = wechat_driver.create_router(prefer_desktop=use_desktop, is_enterprise=is_enterprise)
             
             # 发送消息（先执行再截屏，避免截屏抢占焦点导致快捷键落到浏览器）
             result = router.send_message(
-                contact_name, message, skip_search=skip_contact_search
+                contact_name,
+                message,
+                skip_search=skip_contact_search,
+                contact_hint=contact_hint,
+                cancel_checker=lambda: self.is_cancelled(request_id),
             )
+            if self.is_cancelled(request_id):
+                return {
+                    "success": False,
+                    "message": "request_cancelled",
+                    "stderr": "request_cancelled_by_user",
+                    "retryable": False,
+                    "artifacts": [],
+                    "screenshots": shots,
+                }
             shots = self._capture_screenshot("wechat_send")
             
             if result.get("success"):
@@ -3910,6 +4078,9 @@ class ARIAManager:
                     "stdout": f"已执行向 {contact_name} 发送消息的操作（使用{method}）",
                     "artifacts": [],
                     "screenshots": shots,
+                    "strategy_path": "rule_path",
+                    "confidence": 0.86,
+                    "fallback_used": bool(result.get("fallback_used")),
                 }
                 
                 # 添加警告信息（如果有）
@@ -3922,12 +4093,29 @@ class ARIAManager:
                 return response
             else:
                 error = result.get("error", "unknown")
+                if error == "wechat_need_disambiguation":
+                    candidates = result.get("candidates")
+                    msg = format_wechat_need_disambiguation_message(candidates if isinstance(candidates, list) else [])
+                    return {
+                        "success": False,
+                        "message": msg,
+                        "stderr": error,
+                        "retryable": True,
+                        "artifacts": [],
+                        "screenshots": shots,
+                        "strategy_path": "rule_path",
+                        "confidence": 0.25,
+                        "safe_block_reason": "need_disambiguation",
+                    }
                 return {
                     "success": False,
                     "message": "wechat_send_failed",
                     "stderr": error,
                     "artifacts": [],
                     "screenshots": shots,
+                    "strategy_path": "rule_path",
+                    "confidence": 0.3,
+                    "safe_block_reason": "unresolved_target",
                 }
                 
         except Exception as e:

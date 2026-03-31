@@ -187,6 +187,64 @@
             color: var(--danger);
             background: rgba(220, 38, 38, 0.08);
         }
+        .chat-message-attachments {
+            margin-top: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            max-width: 78%;
+        }
+        .user-message .chat-message-attachments {
+            justify-content: flex-end;
+            margin-left: auto;
+        }
+        .chat-attachment-thumb {
+            width: 120px;
+            height: 96px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            background: #eef2ff;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+        }
+        .chat-attachment-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .chat-attachment-file {
+            min-width: 180px;
+            max-width: 280px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            padding: 8px 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+        }
+        .chat-attachment-file-icon {
+            width: 28px;
+            text-align: center;
+            color: var(--muted);
+            flex-shrink: 0;
+        }
+        .chat-attachment-file-main {
+            min-width: 0;
+        }
+        .chat-attachment-file-name {
+            font-size: 12px;
+            line-height: 1.3;
+            color: var(--text);
+            word-break: break-word;
+        }
+        .chat-attachment-file-meta {
+            font-size: 11px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
         .chat-composer-input-row {
             display: flex;
             align-items: center;
@@ -310,6 +368,48 @@
         }
         .chat-composer-send i {
             font-size: 18px;
+        }
+        .double-confirm-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.35);
+            z-index: 1200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .double-confirm-box {
+            width: min(420px, 92vw);
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            box-shadow: 0 16px 36px rgba(15, 23, 42, 0.22);
+            padding: 14px;
+        }
+        .double-confirm-title {
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .double-confirm-text {
+            font-size: 13px;
+            color: #334155;
+            white-space: pre-wrap;
+            margin-bottom: 12px;
+        }
+        .double-confirm-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        .double-confirm-btn {
+            min-width: 42px;
+            min-height: 36px;
+            border-radius: 10px;
+            font-size: 18px;
+            line-height: 1;
+            padding: 0 10px;
         }
         #chat-cancel-btn.chat-composer-cancel {
             border-radius: 12px;
@@ -1017,31 +1117,47 @@
                 <div class="card-header">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <h5 class="card-title mb-0" data-i18n="app.tab.methods">Experience Center</h5>
-                            <p class="text-muted mb-0 small">Manage built-in and custom method templates to improve task efficiency.</p>
+                            <h5 class="card-title mb-0" data-i18n="app.tab.methods">Skills Hub</h5>
+                            <p class="text-muted mb-0 small">从推荐技能直接发起任务，并查看每条经验的质量与回归状态。</p>
                         </div>
                         <div>
-                            <button class="btn btn-outline-secondary btn-sm mr-2">
+                            <button class="btn btn-outline-secondary btn-sm mr-2" id="import-methodologies-btn" type="button">
                                 <i class="fa fa-upload"></i> <span data-i18n="app.method.import">Import</span>
                             </button>
-                            <button class="btn btn-primary btn-sm">
+                            <button class="btn btn-outline-info btn-sm mr-2" id="create-draft-from-recent-btn" type="button">
+                                <i class="fa fa-magic"></i> 从最近成功任务生成草稿
+                            </button>
+                            <button class="btn btn-primary btn-sm" id="new-methodology-btn" type="button">
                                 <i class="fa fa-plus"></i> <span data-i18n="app.method.new">New Method</span>
                             </button>
                         </div>
                     </div>
                 </div>
                 <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <div id="experience-alerts" class="small"></div>
+                        </div>
+                    </div>
+                    <div class="row mb-4" id="experience-hero-cards">
+                        <div class="col-12 text-center text-muted py-3">
+                            正在加载推荐技能...
+                        </div>
+                    </div>
                     <div class="row mb-4">
                         <div class="col-md-6">
                             <div class="input-group">
-                                <input id="methodology-search-input" type="text" class="form-control" placeholder="Search method name, tags, description">
+                                <input id="methodology-search-input" type="text" class="form-control" placeholder="搜索技能名、场景、关键词">
                                 <button id="methodology-search-btn" class="btn btn-primary" type="button">
                                     <i class="fa fa-search"></i> <span data-i18n="common.search">Search</span>
                                 </button>
                             </div>
                             <div class="mt-2">
-                                <button id="methodology-health-btn" class="btn btn-outline-info btn-sm" type="button">
+                                <button id="methodology-health-btn" class="btn btn-outline-info btn-sm mr-2" type="button">
                                     <i class="fa fa-heartbeat"></i> Health Dashboard
+                                </button>
+                                <button id="experience-refresh-btn" class="btn btn-outline-secondary btn-sm" type="button">
+                                    <i class="fa fa-refresh"></i> Refresh Hub
                                 </button>
                             </div>
                         </div>
@@ -1055,17 +1171,14 @@
                             </select>
                         </div>
                         <div class="col-md-3">
-                            <select class="form-select" id="method-tag-filter">
-                                <option value="">All Tags</option>
-                                <option value="Python">Python</option>
-                                <option value="爬虫">Crawler</option>
-                                <option value="数据分析">Data Analysis</option>
-                                <option value="产品设计">Product Design</option>
-                            </select>
+                            <div class="btn-group w-100" role="group" aria-label="Method view switch">
+                                <button class="btn btn-outline-primary active" id="method-view-skills-btn" type="button">技能卡片</button>
+                                <button class="btn btn-outline-primary" id="method-view-raw-btn" type="button">原始方法论</button>
+                            </div>
                         </div>
                     </div>
                     <div class="row">
-                        <!-- 左侧经验列表 -->
+                        <!-- 左侧技能/方法列表 -->
                         <div class="col-md-4">
                             <div class="card h-100">
                                 <div class="card-header">
@@ -1089,12 +1202,12 @@
                         <div class="col-md-8">
                             <div class="card h-100">
                                 <div class="card-header">
-                                    <h6 class="card-title mb-0" data-i18n="app.method.detailTitle">Select a method to view details</h6>
+                                    <h6 class="card-title mb-0" data-i18n="app.method.detailTitle">选择技能查看详情与复用建议</h6>
                                 </div>
                                 <div class="card-body" id="methodology-detail-body">
                                     <div class="text-center text-muted">
                                         <i class="fa fa-folder-open fa-3x mb-3"></i>
-                                        <p data-i18n="app.method.pickForDetail">Select one method on the left to view details.</p>
+                                        <p data-i18n="app.method.pickForDetail">请从左侧选择一条技能/经验查看详情。</p>
                                     </div>
                                 </div>
                             </div>
@@ -1200,6 +1313,10 @@
             let currentLogs = [];
             let workflowEventIds = new Set();
             let selectedMethodologyIds = new Set();
+            let methodologyCache = [];
+            let skillCardCache = [];
+            let currentMethodView = 'skills'; // skills | raw
+            let currentMethodSelectionId = '';
             let currentTaskId = null;
             /** 下一则用户消息携带 new_task: true（一次后由 sendMessage 清零） */
             let nextSendAsNewTask = false;
@@ -1211,6 +1328,7 @@
             let currentExecutionSessionId = null;
             let executionStatusTimer = null;
             let isTaskRunning = false;
+            let cancelRequestedForCurrentTask = false;
             let lastExecReportKey = '';
             /** 已结束（completed/aborted/manual_takeover）的 execution session，避免 loadConversationDetail 再次 startExecutionStatusPolling 造成 status↔conversation 死循环 */
             let lastTerminalExecutionSessionId = null;
@@ -1693,11 +1811,83 @@
                     if (window.ariaI18n) window.ariaI18n.apply($chat[0]);
                     return;
                 }
+                function normalizeAttachments(meta) {
+                    if (!meta || !Array.isArray(meta.attachments)) return [];
+                    return meta.attachments.filter(function(a) {
+                        return a && typeof a === 'object' && String(a.path || '').trim();
+                    });
+                }
+                function attachmentExt(name, ext) {
+                    const e = String(ext || '').trim().toLowerCase();
+                    if (e) return e;
+                    const n = String(name || '');
+                    const pos = n.lastIndexOf('.');
+                    if (pos < 0) return '';
+                    return n.slice(pos + 1).toLowerCase();
+                }
+                function isImageAttachment(ext) {
+                    return ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(String(ext || '').toLowerCase());
+                }
+                function attachmentIcon(ext) {
+                    const e = String(ext || '').toLowerCase();
+                    if (isImageAttachment(e)) return 'fa-file-image-o';
+                    if (e === 'pdf') return 'fa-file-pdf-o';
+                    if (['doc', 'docx'].includes(e)) return 'fa-file-word-o';
+                    if (['xls', 'xlsx', 'xlsm', 'csv'].includes(e)) return 'fa-file-excel-o';
+                    if (e === 'pptx') return 'fa-file-powerpoint-o';
+                    if (['mp4', 'webm', 'mov'].includes(e)) return 'fa-file-video-o';
+                    return 'fa-file-o';
+                }
+                function formatAttachmentSize(size) {
+                    const n = Number(size || 0);
+                    if (!Number.isFinite(n) || n <= 0) return '';
+                    if (n < 1024) return `${n} B`;
+                    if (n < 1024 * 1024) return `${Math.round(n / 102.4) / 10} KB`;
+                    return `${Math.round(n / 104857.6) / 10} MB`;
+                }
+                function renderMessageAttachments(attachments) {
+                    if (!attachments || !attachments.length) return '';
+                    const cards = attachments.map(function(a) {
+                        const path = String(a.path || '').trim();
+                        if (!path) return '';
+                        const name = String(a.name || path.split('/').pop() || 'file');
+                        const ext = attachmentExt(name, a.ext);
+                        const safeName = escapeHtml(name);
+                        const previewUrl = `/api/workspace_asset?path=${encodeURIComponent(path)}`;
+                        const downloadUrl = `/api/workspace_file?path=${encodeURIComponent(path)}`;
+                        if (isImageAttachment(ext)) {
+                            return (
+                                `<a class="chat-attachment-thumb" href="${previewUrl}" target="_blank" rel="noopener" title="${safeName}">` +
+                                `<img src="${previewUrl}" alt="${safeName}" loading="lazy">` +
+                                `</a>`
+                            );
+                        }
+                        const sizeMeta = formatAttachmentSize(a.size);
+                        const metaLine = escapeHtml([ext ? ext.toUpperCase() : '', sizeMeta].filter(Boolean).join('  '));
+                        return (
+                            `<a class="chat-attachment-file text-decoration-none" href="${downloadUrl}" target="_blank" rel="noopener" title="${safeName}">` +
+                            `<span class="chat-attachment-file-icon"><i class="fa ${attachmentIcon(ext)}" aria-hidden="true"></i></span>` +
+                            `<span class="chat-attachment-file-main">` +
+                            `<div class="chat-attachment-file-name">${safeName}</div>` +
+                            `<div class="chat-attachment-file-meta">${metaLine || '&nbsp;'}</div>` +
+                            `</span>` +
+                            `</a>`
+                        );
+                    }).filter(Boolean).join('');
+                    if (!cards) return '';
+                    return `<div class="chat-message-attachments">${cards}</div>`;
+                }
                 messages.forEach(msg => {
                     if ((msg.role || '') === 'user') {
+                        const meta = msg.meta || {};
+                        const attachmentsHtml = renderMessageAttachments(normalizeAttachments(meta));
+                        const contentText = String(msg.content || '');
+                        const isAttachmentPlaceholder = /^\s*\[已上传附件\s*\d+\s*个\]\s*$/.test(contentText);
+                        const showText = !isAttachmentPlaceholder || !attachmentsHtml;
                         $chat.append(`
                             <div class="chat-message user-message">
-                                <div class="message-content">${escapeHtml(msg.content || '')}</div>
+                                ${showText ? `<div class="message-content">${escapeHtml(contentText)}</div>` : ''}
+                                ${attachmentsHtml}
                             </div>
                         `);
                     } else {
@@ -2023,44 +2213,134 @@
                 });
             }
 
-            function renderMethodologyList(methodologies) {
-                const list = methodologies || [];
+            function trackExperienceEvent(eventName, methodId = '', conversationId = '') {
+                $.ajax({
+                    url: '/api/experience_metrics/event',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ event: eventName, method_id: methodId, conversation_id: conversationId })
+                });
+            }
+
+            function renderExperienceAlerts(alerts, regression) {
+                const $box = $('#experience-alerts');
+                const list = Array.isArray(alerts) ? alerts : [];
+                const reg = regression || {};
+                if (!list.length && !(reg && reg.available)) {
+                    $box.html('');
+                    return;
+                }
+                const regLine = reg && reg.available
+                    ? `<div class="text-muted small mb-1">Harness: match ${(Number(reg.match_rate || 0) * 100).toFixed(0)}% | strict ${(Number(reg.strict_pass_rate || 0) * 100).toFixed(0)}% | cases ${escapeHtml(String(reg.total_cases || 0))}</div>`
+                    : `<div class="text-muted small mb-1">Harness: 暂无回归报告（可运行 scripts/run_regression_benchmark.py 生成）</div>`;
+                const html = list.map((a) => {
+                    const lvl = String(a.level || 'info');
+                    const cls = lvl === 'success' ? 'alert-success' : (lvl === 'warning' ? 'alert-warning' : 'alert-secondary');
+                    return `<div class="alert ${cls} py-2 px-3 mb-2">${escapeHtml(String(a.message || ''))}</div>`;
+                }).join('');
+                $box.html(`${regLine}${html}`);
+            }
+
+            function renderSkillHeroCards(cards) {
+                const $wrap = $('#experience-hero-cards');
+                const list = Array.isArray(cards) ? cards.slice(0, 6) : [];
+                if (!list.length) {
+                    $wrap.html(`<div class="col-12 text-center text-muted py-2">${tr('app.method.none', 'No methods yet.')}</div>`);
+                    return;
+                }
+                const cardHtml = list.map((c) => {
+                    const label = String(c.health_label || 'caution');
+                    const badge = label === 'stable' ? 'bg-success' : (label === 'deprecate' ? 'bg-danger' : 'bg-warning text-dark');
+                    const keywords = Array.isArray(c.keywords) ? c.keywords.slice(0, 3).join(' / ') : '';
+                    return `
+                        <div class="col-md-4 mb-2">
+                            <div class="card h-100 methodology-item" data-id="${escapeHtml(String(c.method_id || ''))}">
+                                <div class="card-body py-2">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div class="font-weight-medium pr-2">${escapeHtml(String(c.title || 'Untitled'))}</div>
+                                        <span class="badge ${badge}">${escapeHtml(String(c.risk_hint || ''))}</span>
+                                    </div>
+                                    <div class="text-xs text-muted mt-1">${escapeHtml(String(c.category || '通用/其他'))}</div>
+                                    <div class="text-xs text-muted mt-1">推荐分 ${escapeHtml((Number(c.recommendation_score || 0) * 100).toFixed(0))} | 质量 ${escapeHtml(Number(c.quality_score_avg || 0).toFixed(2))}</div>
+                                    <div class="text-xs text-muted mt-1">${escapeHtml(keywords)}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                $wrap.html(cardHtml);
+            }
+
+            function getFilteredMethodologies() {
+                const kw = ($('#methodology-search-input').val() || '').trim().toLowerCase();
+                const cat = ($('#method-category-filter').val() || '').trim();
+                let list = Array.isArray(methodologyCache) ? methodologyCache.slice() : [];
+                if (cat) {
+                    list = list.filter((m) => String(m.category || '').includes(cat));
+                }
+                if (kw) {
+                    list = list.filter((m) => {
+                        const txt = [
+                            m.title || '',
+                            m.scene || '',
+                            Array.isArray(m.keywords) ? m.keywords.join(' ') : ''
+                        ].join(' ').toLowerCase();
+                        return txt.includes(kw);
+                    });
+                }
+                if (currentMethodView === 'skills' && Array.isArray(skillCardCache) && skillCardCache.length) {
+                    const scoreMap = {};
+                    skillCardCache.forEach((c) => { scoreMap[String(c.method_id || '')] = Number(c.recommendation_score || 0); });
+                    list.sort((a, b) => (scoreMap[String(b.method_id || '')] || 0) - (scoreMap[String(a.method_id || '')] || 0));
+                }
+                return list;
+            }
+
+            function renderMethodologyList() {
+                const list = getFilteredMethodologies();
                 const $list = $('#methodology-list');
                 $list.empty();
                 if (!list.length) {
                     $list.append(`<div class="p-3 text-center text-muted">${tr('app.method.none', 'No methods yet.')}</div>`);
                     return;
                 }
+                const skillMap = {};
+                (skillCardCache || []).forEach((c) => { skillMap[String(c.method_id || '')] = c; });
                 list.forEach(function(m) {
+                    const methodId = m.method_id || '';
+                    const checked = selectedMethodologyIds.has(methodId) ? 'checked' : '';
                     const title = m.title || m.scene || tr('app.method.unnamed', 'Untitled');
                     const category = m.category || tr('app.method.general', 'General');
                     const successCount = m.success_count ?? 0;
                     const version = Number(m.version || 1);
                     const score = Number(m.score ?? 0);
                     const scoreText = Number.isFinite(score) ? score.toFixed(2) : '0.00';
-                    const methodId = m.method_id || '';
-                    const checked = selectedMethodologyIds.has(methodId) ? 'checked' : '';
+                    const skill = skillMap[methodId] || {};
+                    const reco = Number(skill.recommendation_score || 0);
+                    const health = String(skill.health_label || '');
+                    const healthText = health === 'stable' ? '稳态' : (health === 'deprecate' ? '低健康' : '观察中');
                     $list.append(`
-                        <div class="p-3 methodology-item" data-id="${escapeHtml(methodId)}">
+                        <div class="p-3 methodology-item ${methodId === currentMethodSelectionId ? 'bg-primary bg-opacity-10' : ''}" data-id="${escapeHtml(methodId)}">
                             <div class="d-flex align-items-start justify-content-between">
                                 <div class="font-weight-medium pr-2">${escapeHtml(title)}</div>
                                 <input class="form-check-input method-select-checkbox" type="checkbox" data-id="${escapeHtml(methodId)}" ${checked}>
                             </div>
                             <div class="text-xs text-muted mt-1">${tr('app.method.category', 'Category')}: ${escapeHtml(category)}</div>
-                            <div class="text-xs text-muted mt-1">${tr('app.method.successCount', 'Success Count')}: ${escapeHtml(String(successCount))}</div>
-                            <div class="text-xs text-muted mt-1">Version: ${escapeHtml(String(version))} | Quality: ${escapeHtml(scoreText)}</div>
+                            <div class="text-xs text-muted mt-1">${tr('app.method.successCount', 'Success Count')}: ${escapeHtml(String(successCount))} | v${escapeHtml(String(version))}</div>
+                            <div class="text-xs text-muted mt-1">Quality: ${escapeHtml(scoreText)} | Recommend ${(reco * 100).toFixed(0)} | ${escapeHtml(healthText)}</div>
                         </div>
                     `);
                 });
             }
 
-            function renderMethodologyDetail(method) {
+            function renderMethodologyDetail(method, options = {}) {
                 const methodId = method.method_id || '';
+                const isDraft = !!options.isDraft;
                 const title = method.title || method.scene || tr('app.method.unnamed', 'Untitled');
                 const category = method.category || tr('app.method.general', 'General');
                 const scene = method.scene || method.scenario || tr('app.method.unnamed', 'Untitled');
-                const keywords = method.keywords || [];
-                const solveSteps = method.solve_steps || [];
+                const keywords = Array.isArray(method.keywords) ? method.keywords : [];
+                const solveSteps = Array.isArray(method.solve_steps) ? method.solve_steps : [];
                 const applicableRange = method.applicable_range || '';
                 const successCount = method.success_count ?? 0;
                 const usageCount = method.usage_count ?? 0;
@@ -2069,65 +2349,89 @@
                 const qualityScore = Number(method.score ?? 0);
                 const qualityText = Number.isFinite(qualityScore) ? qualityScore.toFixed(3) : '0.000';
                 const qualityMetrics = method.quality_metrics && typeof method.quality_metrics === 'object' ? method.quality_metrics : {};
-                const keywordText = Array.isArray(keywords) ? keywords.join('、') : String(keywords || '');
-                const qmText = Object.keys(qualityMetrics).length
-                    ? escapeHtml(JSON.stringify(qualityMetrics))
-                    : tr('app.method.none', 'No methods yet.');
-                const stepsHtml = Array.isArray(solveSteps) && solveSteps.length
+                const skill = (skillCardCache || []).find((c) => String(c.method_id || '') === String(methodId || '')) || {};
+                const keywordText = keywords.join('、');
+                const qmText = Object.keys(qualityMetrics).length ? escapeHtml(JSON.stringify(qualityMetrics)) : '-';
+                const stepsHtml = solveSteps.length
                     ? `<ol>${solveSteps.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ol>`
                     : `<p class="text-muted">${tr('app.method.noSteps', 'No solve steps')}</p>`;
-                const catLabel = (v) => {
-                    if (v === '数据分析/报表') return tr('app.method.cat.dataReports', 'Data Analysis / Reports');
-                    if (v === '开发工程/代码实现') return tr('app.method.cat.engineering', 'Engineering / Code');
-                    if (v === '产品设计/需求') return tr('app.method.cat.product', 'Product / Requirements');
-                    if (v === '运营增长/市场') return tr('app.method.cat.operations', 'Operations / Growth');
-                    if (v === '文案内容/知识整理') return tr('app.method.cat.content', 'Content / Knowledge');
-                    if (v === '通用/其他') return tr('app.method.cat.general', 'General / Other');
-                    return v;
-                };
-
+                const draftControls = isDraft ? `
+                    <div class="alert alert-info py-2 px-3">当前是草稿，可编辑后保存为正式经验。</div>
+                    <button class="btn btn-success btn-sm mr-2" id="save-draft-methodology-btn" type="button">保存草稿为经验</button>
+                    <button class="btn btn-outline-secondary btn-sm" id="discard-draft-methodology-btn" type="button">放弃草稿</button>
+                ` : '';
                 $('#methodology-detail-body').html(`
                     <div class="methodology-detail-content">
                         <div class="d-flex justify-content-between align-items-center mb-3">
-                            <div class="text-muted" style="font-size:12px;">ID: ${escapeHtml(methodId)}</div>
+                            <div class="text-muted" style="font-size:12px;">ID: ${escapeHtml(methodId || '(draft)')}</div>
                             <div>
                                 <button class="btn btn-outline-secondary btn-sm mr-2" id="refresh-methodologies-btn" type="button">${tr('app.method.refresh', 'Refresh')}</button>
                                 <button class="btn btn-outline-info btn-sm mr-2" id="show-method-health-btn" type="button">Health</button>
-                                <button class="btn btn-outline-danger btn-sm" id="delete-methodology-btn" data-method-id="${escapeHtml(methodId)}" type="button">${tr('app.method.delete', 'Delete')}</button>
+                                ${!isDraft ? `<button class="btn btn-outline-danger btn-sm" id="delete-methodology-btn" data-method-id="${escapeHtml(methodId)}" type="button">${tr('app.method.delete', 'Delete')}</button>` : ''}
                             </div>
                         </div>
-                        <p><strong>${tr('app.method.title', 'Title')}:</strong> ${escapeHtml(title)}</p>
+                        ${draftControls}
+                        <div class="mb-2">
+                            <strong>${tr('app.method.title', 'Title')}:</strong>
+                            <input id="method-title-input" class="form-control form-control-sm mt-1" value="${escapeHtml(title)}">
+                        </div>
                         <div class="mb-2">
                             <strong>${tr('app.method.category', 'Category')}:</strong>
-                            <select id="method-category-select" class="form-select form-select-sm d-inline-block" style="width: 240px;">
-                                <option value="数据分析/报表" ${category === '数据分析/报表' ? 'selected' : ''}>${catLabel('数据分析/报表')}</option>
-                                <option value="开发工程/代码实现" ${category === '开发工程/代码实现' ? 'selected' : ''}>${catLabel('开发工程/代码实现')}</option>
-                                <option value="产品设计/需求" ${category === '产品设计/需求' ? 'selected' : ''}>${catLabel('产品设计/需求')}</option>
-                                <option value="运营增长/市场" ${category === '运营增长/市场' ? 'selected' : ''}>${catLabel('运营增长/市场')}</option>
-                                <option value="文案内容/知识整理" ${category === '文案内容/知识整理' ? 'selected' : ''}>${catLabel('文案内容/知识整理')}</option>
-                                <option value="通用/其他" ${category === '通用/其他' || category === '通用' ? 'selected' : ''}>${catLabel('通用/其他')}</option>
-                            </select>
-                            <button class="btn btn-outline-primary btn-sm" id="save-method-category-btn" data-method-id="${escapeHtml(methodId)}" type="button">${tr('app.method.saveCategory', 'Save Category')}</button>
+                            <input id="method-category-input" class="form-control form-control-sm mt-1" value="${escapeHtml(category)}">
                         </div>
-                        <p><strong>${tr('app.method.scene', 'Scene')}:</strong> ${escapeHtml(scene)}</p>
-                        <p><strong>${tr('app.method.keywords', 'Keywords')}:</strong> ${escapeHtml(keywordText)}</p>
+                        <div class="mb-2">
+                            <strong>${tr('app.method.scene', 'Scene')}:</strong>
+                            <textarea id="method-scene-input" class="form-control form-control-sm mt-1" rows="2">${escapeHtml(scene)}</textarea>
+                        </div>
+                        <div class="mb-2">
+                            <strong>${tr('app.method.keywords', 'Keywords')}:</strong>
+                            <input id="method-keywords-input" class="form-control form-control-sm mt-1" value="${escapeHtml(keywordText)}" placeholder="用空格或逗号分隔">
+                        </div>
+                        <div class="mb-2">
+                            <strong>${tr('app.method.steps', 'Steps')}:</strong>
+                            <textarea id="method-steps-input" class="form-control form-control-sm mt-1" rows="6">${escapeHtml(solveSteps.join('\n'))}</textarea>
+                        </div>
                         <p><strong>${tr('app.method.range', 'Applicable Range')}:</strong> ${escapeHtml(applicableRange || tr('app.method.general', 'General'))}</p>
-                        <p><strong>${tr('app.method.successCount', 'Success Count')}:</strong> ${escapeHtml(String(successCount))}</p>
-                        <p><strong>Usage Count:</strong> ${escapeHtml(String(usageCount))}</p>
+                        <p><strong>${tr('app.method.successCount', 'Success Count')}:</strong> ${escapeHtml(String(successCount))} | <strong>Usage:</strong> ${escapeHtml(String(usageCount))}</p>
                         <p><strong>Version:</strong> ${escapeHtml(String(version))}${parentVersion !== '' ? ` (parent: ${escapeHtml(String(parentVersion))})` : ''}</p>
-                        <p><strong>Quality Score:</strong> ${escapeHtml(qualityText)}</p>
+                        <p><strong>Quality Score:</strong> ${escapeHtml(qualityText)} | <strong>Recommend:</strong> ${escapeHtml((Number(skill.recommendation_score || 0) * 100).toFixed(0))}</p>
+                        <p><strong>Risk Hint:</strong> ${escapeHtml(String(skill.risk_hint || '暂无'))}</p>
                         <p><strong>Quality Metrics:</strong> <code>${qmText}</code></p>
-                        <div><strong>${tr('app.method.steps', 'Steps')}:</strong>${stepsHtml}</div>
+                        <div><strong>当前步骤预览:</strong>${stepsHtml}</div>
+                        ${!isDraft ? `
+                            <div class="mt-3">
+                                <button class="btn btn-primary btn-sm mr-2" id="reuse-skill-btn" data-method-id="${escapeHtml(methodId)}" type="button">一键复用（填充输入框）</button>
+                                <button class="btn btn-outline-primary btn-sm mr-2" id="generate-plan-from-skill-btn" data-method-id="${escapeHtml(methodId)}" type="button">生成执行草案</button>
+                                <button class="btn btn-outline-warning btn-sm" id="rollback-methodology-btn" data-method-id="${escapeHtml(methodId)}" type="button">回滚到上一版本</button>
+                            </div>
+                        ` : ''}
                     </div>
                 `);
+                if (methodId) {
+                    $('#methodology-detail-body').data('method-id', methodId);
+                    trackExperienceEvent('method_detail_open', methodId, currentConversationId || '');
+                }
             }
 
             function loadMethodologies() {
-                $.ajax({
+                return $.ajax({
                     url: '/api/get_methodologies',
+                    type: 'GET'
+                }).done(function(resp) {
+                    methodologyCache = resp.methodologies || [];
+                    renderMethodologyList();
+                });
+            }
+
+            function loadExperienceHubData() {
+                return $.ajax({
+                    url: '/api/experience_hub_data?limit=120',
                     type: 'GET',
                     success: function(resp) {
-                        renderMethodologyList(resp.methodologies || []);
+                        const data = resp || {};
+                        skillCardCache = data.all_skill_cards || [];
+                        renderSkillHeroCards(data.recommended_skills || []);
+                        renderExperienceAlerts(data.alerts || [], data.regression || {});
                     }
                 });
             }
@@ -2208,18 +2512,7 @@
                     `);
                     $cat.val(cur || '');
                 }
-                const $tag = $('#method-tag-filter');
-                if ($tag.length) {
-                    const cur = $tag.val();
-                    $tag.html(`
-                        <option value="">${tr('app.method.filter.allTags', 'All Tags')}</option>
-                        <option value="Python">Python</option>
-                        <option value="爬虫">${tr('app.method.filter.crawler', 'Crawler')}</option>
-                        <option value="数据分析">${tr('app.method.filter.dataAnalysis', 'Data Analysis')}</option>
-                        <option value="产品设计">${tr('app.method.filter.productDesign', 'Product Design')}</option>
-                    `);
-                    $tag.val(cur || '');
-                }
+                renderMethodologyList();
             }
 
             function loadApiKeyStatus() {
@@ -2295,7 +2588,41 @@
             function appendOptimisticUserMessage(text) {
                 const $chat = $('#chat .chat-area');
                 $chat.find('#chat-empty-hint, #chat-welcome-min').remove();
-                $chat.append(`<div class="chat-message user-message"><div class="message-content">${escapeHtml(text)}</div></div>`);
+                const localAttachments = pendingChatFiles.map(function(file) {
+                    const ext = (String(file.name || '').split('.').pop() || '').toLowerCase();
+                    const safeName = escapeHtml(String(file.name || 'file'));
+                    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
+                        const url = URL.createObjectURL(file);
+                        return (
+                            `<span class="chat-attachment-thumb" title="${safeName}">` +
+                            `<img src="${url}" alt="${safeName}" loading="lazy">` +
+                            `</span>`
+                        );
+                    }
+                    let icon = 'fa-file-o';
+                    if (ext === 'pdf') icon = 'fa-file-pdf-o';
+                    else if (['doc', 'docx'].includes(ext)) icon = 'fa-file-word-o';
+                    else if (['xls', 'xlsx', 'xlsm', 'csv'].includes(ext)) icon = 'fa-file-excel-o';
+                    else if (ext === 'pptx') icon = 'fa-file-powerpoint-o';
+                    else if (['mp4', 'webm', 'mov'].includes(ext)) icon = 'fa-file-video-o';
+                    const meta = ext ? escapeHtml(ext.toUpperCase()) : '&nbsp;';
+                    return (
+                        `<span class="chat-attachment-file" title="${safeName}">` +
+                        `<span class="chat-attachment-file-icon"><i class="fa ${icon}" aria-hidden="true"></i></span>` +
+                        `<span class="chat-attachment-file-main">` +
+                        `<div class="chat-attachment-file-name">${safeName}</div>` +
+                        `<div class="chat-attachment-file-meta">${meta}</div>` +
+                        `</span>` +
+                        `</span>`
+                    );
+                }).filter(Boolean).join('');
+                const safeText = String(text || '').trim();
+                $chat.append(
+                    `<div class="chat-message user-message">` +
+                    `${safeText ? `<div class="message-content">${escapeHtml(safeText)}</div>` : ''}` +
+                    `${localAttachments ? `<div class="chat-message-attachments">${localAttachments}</div>` : ''}` +
+                    `</div>`
+                );
                 const thinking = tr('app.request.thinking', 'Thinking');
                 $chat.append(
                     `<div class="chat-message ai-message" id="temp-ai-message"><div class="message-content ai-typing-indicator">` +
@@ -2365,7 +2692,6 @@
                             <div class="text-muted mb-2">${summary}</div>
                             ${planHtml}
                             ${needDouble ? `<div class="text-warning mb-2">${tr('app.actionPlan.highRiskHint', 'High-risk actions require a second confirmation.')}</div>` : ''}
-                            <div class="alert alert-secondary py-2 px-3 mb-2" style="font-size:13px;">${tr('app.actionPlan.mustClick', 'You must click the confirm button below to run commands.')}</div>
                             <div class="d-flex align-items-center" style="gap:8px;">
                                 <button class="btn btn-sm btn-primary confirm-action-btn" type="button" title="${tr('app.actionPlan.confirmBtn', 'Confirm and Execute')}" aria-label="${tr('app.actionPlan.confirmBtn', 'Confirm and Execute')}">✓</button>
                                 <button class="btn btn-sm btn-outline-secondary reject-action-btn" type="button" title="${tr('app.actionPlan.rejectBtn', 'Cancel')}" aria-label="${tr('app.actionPlan.rejectBtn', 'Cancel')}">✕</button>
@@ -2382,6 +2708,38 @@
                 const $chat = $('#chat .chat-area');
                 const $card = $chat.find('.pending-action-card').last();
                 const $btn = $card.find('.confirm-action-btn');
+                function showDoubleConfirmDialog(message, onConfirm, onCancel) {
+                    const existing = $('#double-confirm-overlay');
+                    if (existing.length) existing.remove();
+                    const safeMsg = escapeHtml(String(message || tr('app.actionPlan.doubleConfirmNeeded', 'Second confirmation is required for high-risk actions.')));
+                    const html = `
+                        <div class="double-confirm-overlay" id="double-confirm-overlay">
+                            <div class="double-confirm-box" role="dialog" aria-modal="true" aria-label="${escapeHtml(tr('app.actionPlan.doubleConfirmNeeded', 'Second confirmation is required for high-risk actions.'))}">
+                                <div class="double-confirm-title">${escapeHtml(tr('app.actionPlan.highRiskHint', 'High-risk actions require a second confirmation.'))}</div>
+                                <div class="double-confirm-text">${safeMsg}</div>
+                                <div class="double-confirm-actions">
+                                    <button type="button" class="btn btn-outline-secondary double-confirm-btn" id="double-confirm-cancel-btn" title="${escapeHtml(tr('app.actionPlan.rejectBtn', 'Cancel'))}" aria-label="${escapeHtml(tr('app.actionPlan.rejectBtn', 'Cancel'))}">✕</button>
+                                    <button type="button" class="btn btn-primary double-confirm-btn" id="double-confirm-ok-btn" title="${escapeHtml(tr('app.actionPlan.confirmBtn', 'Confirm and Execute'))}" aria-label="${escapeHtml(tr('app.actionPlan.confirmBtn', 'Confirm and Execute'))}">✓</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    $('body').append(html);
+                    $('#double-confirm-ok-btn').on('click', function() {
+                        $('#double-confirm-overlay').remove();
+                        if (typeof onConfirm === 'function') onConfirm();
+                    });
+                    $('#double-confirm-cancel-btn').on('click', function() {
+                        $('#double-confirm-overlay').remove();
+                        if (typeof onCancel === 'function') onCancel();
+                    });
+                    $('#double-confirm-overlay').on('click', function(e) {
+                        if (e.target && e.target.id === 'double-confirm-overlay') {
+                            $('#double-confirm-overlay').remove();
+                            if (typeof onCancel === 'function') onCancel();
+                        }
+                    });
+                }
                 function sendConfirm(forceFlag) {
                     $btn.prop('disabled', true).text('…');
                     $.ajax({
@@ -2406,12 +2764,11 @@
                         error: function(xhr) {
                             if (!forceFlag && xhr && xhr.status === 409 && xhr.responseJSON && xhr.responseJSON.requires_double_confirmation) {
                                 const msg = xhr.responseJSON.message || tr('app.actionPlan.doubleConfirmNeeded', 'Second confirmation is required for high-risk actions.');
-                                const ok = window.confirm(`${msg}\n\n${tr('app.actionPlan.confirmBtn', 'Confirm and Execute')}?`);
-                                if (ok) {
-                                    sendConfirm(true);
-                                    return;
-                                }
-                                $btn.prop('disabled', false).text('✓');
+                                showDoubleConfirmDialog(
+                                    msg,
+                                    function() { sendConfirm(true); },
+                                    function() { $btn.prop('disabled', false).text('✓'); }
+                                );
                                 return;
                             }
                             const msg = (xhr && xhr.responseJSON && xhr.responseJSON.message) || tr('app.actionPlan.confirmFailed', 'Failed to execute actions.');
@@ -2568,6 +2925,7 @@
                 // 为本次任务生成前端 request_id，协作日志/SSE 也会带同一个 request_id 供前端过滤
                 const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
                 currentRequestId = requestId;
+                cancelRequestedForCurrentTask = false;
 
                 // 隐藏发送按钮，显示中止按钮
                 $sendBtn.hide();
@@ -2580,13 +2938,7 @@
                 currentWorkflowEvents = [];
                 workflowEventIds = new Set();
                 renderWorkflowAndLogs([], []);
-                let optimisticUser = userInput;
-                if (pendingChatFiles.length) {
-                    const fnames = pendingChatFiles.map(f => f.name).join(', ');
-                    optimisticUser = (optimisticUser ? optimisticUser + '\n\n' : '') +
-                        '[' + tf('app.chat.attachSummary', { n: String(pendingChatFiles.length), names: fnames }, `${pendingChatFiles.length} file(s): ${fnames}`) + ']';
-                }
-                appendOptimisticUserMessage(optimisticUser);
+                appendOptimisticUserMessage(userInput);
                 $input.val('');
                 adjustChatTextareaHeight();
 
@@ -2601,6 +2953,11 @@
                         currentExecutionSessionId = resp.execution_session_id || currentExecutionSessionId;
                         const escaped = escapeHtml(resp.result || '').replace(/\n/g, '<br>');
                         $('#temp-ai-message .message-content').html(escaped);
+                        if (resp.cancelled) {
+                            $('#chat .chat-area').append(
+                                `<div class="chat-message ai-message"><div class="message-content text-warning">${escapeHtml(tr('app.request.cancelled', 'Task cancelled. No further actions will run.'))}</div></div>`
+                            );
+                        }
                         appendTokenUsageToAiMessage($('#temp-ai-message'), resp.token_usage);
                         $('#temp-ai-message').removeAttr('id');
                         if (resp.needs_confirmation && resp.pending_actions) {
@@ -2629,9 +2986,10 @@
                     };
                     const onComplete = function() {
                         $sendBtn.show();
-                        $cancelBtn.hide().prop('disabled', true);
+                        $cancelBtn.hide().prop('disabled', true).attr('title', tr('common.cancel', 'Cancel')).html('<i class="fa fa-stop"></i>');
                         $input.prop('disabled', false);
                         isTaskRunning = false;
+                        cancelRequestedForCurrentTask = false;
                         adjustChatTextareaHeight();
                         focusChatInput();
                         if (currentConversationId) {
@@ -2708,7 +3066,7 @@
             // 初始化
             applyMethodFilterOptions();
             loadApiKeyStatus();
-            loadMethodologies();
+            $.when(loadMethodologies(), loadExperienceHubData()).always(renderMethodologyList);
             loadConversations(true);
             adjustChatTextareaHeight();
             setTimeout(function() { focusChatInput(); }, 450);
@@ -2829,6 +3187,14 @@
             });
             $('#chat-cancel-btn').click(function() {
                 if (!isTaskRunning || !currentRequestId) return;
+                const $btn = $('#chat-cancel-btn');
+                if (cancelRequestedForCurrentTask) return;
+                cancelRequestedForCurrentTask = true;
+                $btn.prop('disabled', true).attr('title', tr('app.request.cancelling', 'Cancelling...')).html('<i class="fa fa-spinner fa-spin"></i>');
+                $('#chat .chat-area').append(
+                    `<div class="chat-message ai-message"><div class="message-content text-warning">${escapeHtml(tr('app.request.cancelSentStrong', 'Cancel signal sent. ARIA is stopping current actions...'))}</div></div>`
+                );
+                $('#chat .chat-area').scrollTop($('#chat .chat-area').prop('scrollHeight'));
                 $.ajax({
                     url: '/api/cancel_task',
                     type: 'POST',
@@ -2837,7 +3203,29 @@
                     success: function(resp) {
                         if (resp.success) {
                             $('#execution-log-area').append(`<div class="execution-log text-warning">${tr('app.request.cancelSent', 'Cancel request sent. Waiting for task to stop...')}</div>`);
+                            // 双保险：若存在异步执行会话，额外请求硬中止，避免“已取消但后续仍执行”。
+                            if (currentExecutionSessionId) {
+                                $.ajax({
+                                    url: '/api/execution/abort',
+                                    type: 'POST',
+                                    contentType: 'application/json',
+                                    data: JSON.stringify({ session_id: currentExecutionSessionId }),
+                                    success: function() {
+                                        $('#execution-log-area').append(`<div class="execution-log text-warning">${escapeHtml(tr('app.exec.abortIssued', 'Execution session abort sent.'))}</div>`);
+                                    }
+                                });
+                            }
+                        } else {
+                            cancelRequestedForCurrentTask = false;
+                            $btn.prop('disabled', false).attr('title', tr('common.cancel', 'Cancel')).html('<i class="fa fa-stop"></i>');
                         }
+                    },
+                    error: function() {
+                        cancelRequestedForCurrentTask = false;
+                        $btn.prop('disabled', false).attr('title', tr('common.cancel', 'Cancel')).html('<i class="fa fa-stop"></i>');
+                        $('#chat .chat-area').append(
+                            `<div class="chat-message ai-message"><div class="message-content text-danger">${escapeHtml(tr('app.request.cancelFailed', 'Failed to send cancel signal. Please retry.'))}</div></div>`
+                        );
                     }
                 });
             });
@@ -2870,6 +3258,10 @@
             });
             $('#chat-tab').on('shown.bs.tab', function() {
                 if (!isTaskRunning) focusChatInput();
+            });
+            $('#methodology-tab').on('shown.bs.tab', function() {
+                trackExperienceEvent('experience_tab_open', '', currentConversationId || '');
+                $.when(loadMethodologies(), loadExperienceHubData()).always(renderMethodologyList);
             });
             $('#conversation-list').on('click', '.session-item', function(e) {
                 if ($(e.target).closest('.session-delete-btn').length) return;
@@ -3002,25 +3394,47 @@
             function performMethodologySearch() {
                 const kw = $('#methodology-search-input').val().trim();
                 if (!kw) {
-                    loadMethodologies();
+                    renderMethodologyList();
                     return;
                 }
-                $.ajax({
-                    url: '/api/search_methodology',
-                    type: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ keyword: kw }),
-                    success: function(resp) {
-                        renderMethodologyList(resp.results || []);
-                    }
-                });
+                renderMethodologyList();
             }
             $('#methodology-search-btn').click(performMethodologySearch);
             $('#methodology-health-btn').click(loadMethodologyHealth);
+            $('#experience-refresh-btn').click(function() {
+                $.when(loadMethodologies(), loadExperienceHubData()).always(function() {
+                    renderMethodologyList();
+                });
+            });
+            $('#method-category-filter').on('change', renderMethodologyList);
+            $('#method-view-skills-btn').on('click', function() {
+                currentMethodView = 'skills';
+                $('#method-view-skills-btn').addClass('active');
+                $('#method-view-raw-btn').removeClass('active');
+                renderMethodologyList();
+                trackExperienceEvent('switch_to_skill_view');
+            });
+            $('#method-view-raw-btn').on('click', function() {
+                currentMethodView = 'raw';
+                $('#method-view-raw-btn').addClass('active');
+                $('#method-view-skills-btn').removeClass('active');
+                renderMethodologyList();
+                trackExperienceEvent('switch_to_raw_view');
+            });
             $('#methodology-search-input').on('keypress', function(e) {
                 if (e.which === 13) {
                     e.preventDefault();
                     performMethodologySearch();
+                }
+            });
+            $('#experience-hero-cards').on('click', '.methodology-item', function() {
+                const id = $(this).attr('data-id');
+                if (!id) return;
+                currentMethodSelectionId = id;
+                const method = (methodologyCache || []).find((m) => String(m.method_id || '') === String(id));
+                if (method) {
+                    renderMethodologyDetail(method);
+                    renderMethodologyList();
                 }
             });
             $('#methodology-list').on('click', '.methodology-item', function(event) {
@@ -3028,17 +3442,10 @@
                 if ($(event.target).closest('.method-select-checkbox').length) return;
                 const id = $(this).attr('data-id');
                 if (!id) return;
-                $('#methodology-list .methodology-item').removeClass('bg-primary bg-opacity-10');
-                $(this).addClass('bg-primary bg-opacity-10');
-                $.ajax({
-                    url: '/api/get_methodology',
-                    type: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ methodology_id: id }),
-                    success: function(resp) {
-                        renderMethodologyDetail(resp.methodology || {});
-                    }
-                });
+                currentMethodSelectionId = id;
+                const method = (methodologyCache || []).find((m) => String(m.method_id || '') === String(id));
+                if (method) renderMethodologyDetail(method);
+                renderMethodologyList();
             });
             $('#methodology-list').on('click', '.method-select-checkbox', function(e) {
                 e.stopPropagation();
@@ -3050,7 +3457,9 @@
                     selectedMethodologyIds.delete(id);
                 }
             });
-            $('#methodology-detail-body').on('click', '#refresh-methodologies-btn', loadMethodologies);
+            $('#methodology-detail-body').on('click', '#refresh-methodologies-btn', function() {
+                $.when(loadMethodologies(), loadExperienceHubData()).always(renderMethodologyList);
+            });
             $('#methodology-detail-body').on('click', '#show-method-health-btn', loadMethodologyHealth);
             $('#methodology-detail-body').on('click', '#refresh-method-health-btn', loadMethodologyHealth);
             $('#methodology-detail-body').on('click', '#delete-methodology-btn', function() {
@@ -3064,8 +3473,9 @@
                     data: JSON.stringify({ methodology_id: id }),
                     success: function(resp) {
                         if (resp.success) {
-                            loadMethodologies();
+                            $.when(loadMethodologies(), loadExperienceHubData()).always(renderMethodologyList);
                             $('#methodology-detail-body').html(`<div class="text-center text-muted">${tr('app.method.deleted', 'Method deleted.')}</div>`);
+                            trackExperienceEvent('method_delete', id, currentConversationId || '');
                         }
                     }
                 });
@@ -3085,8 +3495,9 @@
                     success: function(resp) {
                         if (resp.success) {
                             selectedMethodologyIds.clear();
-                            loadMethodologies();
+                            $.when(loadMethodologies(), loadExperienceHubData()).always(renderMethodologyList);
                             $('#methodology-detail-body').html(`<div class="text-center text-muted">${tr('app.method.deletedBatch', 'Selected methods deleted.')}</div>`);
+                            trackExperienceEvent('method_batch_delete');
                         } else {
                             alert(tr('app.method.deleteBatchFail', 'Batch delete failed. Please retry.'));
                         }
@@ -3096,27 +3507,169 @@
                     }
                 });
             });
-            $('#methodology-detail-body').on('click', '#save-method-category-btn', function() {
+            $('#methodology-detail-body').on('click', '#reuse-skill-btn', function() {
                 const id = $(this).attr('data-method-id');
-                const category = $('#method-category-select').val();
-                if (!id || !category) return;
+                if (!id) return;
+                const method = (methodologyCache || []).find((m) => String(m.method_id || '') === String(id));
+                if (!method) return;
+                const keywords = Array.isArray(method.keywords) ? method.keywords.join(' ') : '';
+                const seed = `${method.scene || method.title || ''} ${keywords}`.trim();
+                $('#chat-text-input').val(seed);
+                adjustChatTextareaHeight();
+                const chatTab = document.getElementById('chat-tab');
+                if (chatTab) {
+                    const instance = bootstrap.Tab.getOrCreateInstance(chatTab);
+                    instance.show();
+                }
+                trackExperienceEvent('reuse_skill_click', id, currentConversationId || '');
+            });
+            $('#methodology-detail-body').on('click', '#generate-plan-from-skill-btn', function() {
+                const id = $(this).attr('data-method-id');
+                if (!id) return;
+                const method = (methodologyCache || []).find((m) => String(m.method_id || '') === String(id));
+                if (!method) return;
+                const steps = Array.isArray(method.solve_steps) ? method.solve_steps.slice(0, 5).join('；') : '';
+                const seed = `按经验执行：${method.scene || method.title || ''}。参考步骤：${steps}`;
+                $('#chat-text-input').val(seed);
+                adjustChatTextareaHeight();
+                trackExperienceEvent('generate_plan_click', id, currentConversationId || '');
+            });
+            $('#methodology-detail-body').on('click', '#rollback-methodology-btn', function() {
+                const id = $(this).attr('data-method-id');
+                if (!id) return;
+                const method = (methodologyCache || []).find((m) => String(m.method_id || '') === String(id));
+                const toVersion = Number((method && method.parent_version) || 0);
+                if (!toVersion) {
+                    alert('当前没有可回滚的历史版本。');
+                    return;
+                }
                 $.ajax({
-                    url: '/api/update_methodology_category',
+                    url: '/api/rollback_methodology',
                     type: 'POST',
                     contentType: 'application/json',
-                    data: JSON.stringify({ methodology_id: id, category }),
+                    data: JSON.stringify({ methodology_id: id, to_version: toVersion }),
                     success: function(resp) {
                         if (resp.success) {
-                            loadMethodologies();
-                            if (resp.methodology) {
-                                renderMethodologyDetail(resp.methodology);
-                            }
+                            $.when(loadMethodologies(), loadExperienceHubData()).always(function() {
+                                const latest = (methodologyCache || []).find((m) => String(m.method_id || '') === String(id));
+                                if (latest) renderMethodologyDetail(latest);
+                                renderMethodologyList();
+                            });
+                            trackExperienceEvent('method_rollback', id, currentConversationId || '');
                         } else {
-                            alert(tr('app.method.categorySaveFail', 'Failed to save category. Please retry.'));
+                            alert('回滚失败，请重试。');
                         }
                     },
                     error: function() {
-                        alert(tr('app.method.categorySaveFail', 'Failed to save category. Please retry.'));
+                        alert('回滚失败，请重试。');
+                    }
+                });
+            });
+            $('#new-methodology-btn').on('click', function() {
+                const draft = {
+                    title: '新技能草稿',
+                    scene: '',
+                    keywords: [],
+                    solve_steps: [],
+                    category: '通用/其他',
+                    applicable_range: '通用'
+                };
+                renderMethodologyDetail(draft, { isDraft: true });
+                trackExperienceEvent('new_draft_open');
+            });
+            $('#create-draft-from-recent-btn').on('click', function() {
+                $.ajax({
+                    url: '/api/create_skill_draft_from_recent',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ conversation_id: currentConversationId || '' }),
+                    success: function(resp) {
+                        if (resp.success && resp.draft) {
+                            renderMethodologyDetail(resp.draft, { isDraft: true });
+                            trackExperienceEvent('draft_from_recent');
+                        } else {
+                            alert(resp.message || '生成草稿失败');
+                        }
+                    },
+                    error: function() {
+                        alert('生成草稿失败');
+                    }
+                });
+            });
+            $('#methodology-detail-body').on('click', '#discard-draft-methodology-btn', function() {
+                $('#methodology-detail-body').html(`<div class="text-center text-muted">${tr('app.method.pickForDetail', '请从左侧选择一条技能/经验查看详情。')}</div>`);
+            });
+            $('#methodology-detail-body').on('click', '#save-draft-methodology-btn', function() {
+                const payload = {
+                    title: ($('#method-title-input').val() || '').trim(),
+                    scene: ($('#method-scene-input').val() || '').trim(),
+                    category: ($('#method-category-input').val() || '').trim() || '通用/其他',
+                    keywords: ($('#method-keywords-input').val() || '').split(/[\s,，;；/|]+/).map(s => s.trim()).filter(Boolean),
+                    solve_steps: ($('#method-steps-input').val() || '').split(/\n+/).map(s => s.trim()).filter(Boolean),
+                    applicable_range: '任务提效',
+                    status: 'published'
+                };
+                if (!payload.scene || !payload.solve_steps.length) {
+                    alert('请至少填写场景和1条步骤。');
+                    return;
+                }
+                $.ajax({
+                    url: '/api/create_methodology',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(payload),
+                    success: function(resp) {
+                        if (resp.success) {
+                            $.when(loadMethodologies(), loadExperienceHubData()).always(function() {
+                                const createdId = resp.methodology_id || (resp.methodology && resp.methodology.method_id);
+                                if (createdId) {
+                                    currentMethodSelectionId = String(createdId);
+                                    const m = (methodologyCache || []).find((x) => String(x.method_id || '') === String(createdId));
+                                    if (m) renderMethodologyDetail(m);
+                                }
+                                renderMethodologyList();
+                            });
+                            trackExperienceEvent('draft_save_as_method');
+                        } else {
+                            alert('保存失败，请重试。');
+                        }
+                    },
+                    error: function() {
+                        alert('保存失败，请重试。');
+                    }
+                });
+            });
+            $('#import-methodologies-btn').on('click', function() {
+                const raw = window.prompt('请粘贴方法论 JSON 数组（每项含 scene/keywords/solve_steps 等字段）');
+                if (!raw) return;
+                let parsed = null;
+                try {
+                    parsed = JSON.parse(raw);
+                } catch (err) {
+                    alert('JSON 格式错误，请重试。');
+                    return;
+                }
+                if (!Array.isArray(parsed)) {
+                    alert('请提供 JSON 数组。');
+                    return;
+                }
+                $.ajax({
+                    url: '/api/import_methodologies',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ items: parsed }),
+                    success: function(resp) {
+                        if (resp.success) {
+                            const msg = `导入完成：成功 ${resp.imported || 0}，跳过 ${resp.skipped || 0}`;
+                            alert(msg);
+                            $.when(loadMethodologies(), loadExperienceHubData()).always(renderMethodologyList);
+                            trackExperienceEvent('method_import');
+                        } else {
+                            alert(resp.message || '导入失败');
+                        }
+                    },
+                    error: function() {
+                        alert('导入失败，请重试。');
                     }
                 });
             });
@@ -3134,7 +3687,7 @@
                 renderWorkflowAndLogs(currentLogs || [], currentWorkflowEvents || []);
                 loadApiKeyStatus();
                 loadConversations(true);
-                loadMethodologies();
+                $.when(loadMethodologies(), loadExperienceHubData()).always(renderMethodologyList);
                 if (pendingChatFiles.length) {
                     renderPendingAttachHint();
                 }

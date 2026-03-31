@@ -16,9 +16,27 @@ from __future__ import annotations
 
 import os
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_DOTENV_LOADED = False
+
+
+def _load_project_dotenv() -> None:
+    """从项目根目录 .env 注入环境变量（不覆盖已存在项），便于 TESSERACT_CMD 等配置生效。"""
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED:
+        return
+    _DOTENV_LOADED = True
+    try:
+        from dotenv import load_dotenv
+
+        env_path = Path(__file__).resolve().parent.parent / ".env"
+        load_dotenv(dotenv_path=env_path, override=False)
+    except Exception:
+        pass
 
 
 def _check_dependencies() -> tuple[bool, str]:
@@ -34,8 +52,16 @@ def _check_dependencies() -> tuple[bool, str]:
 
 def _check_tesseract() -> tuple[bool, str]:
     """检查 Tesseract OCR 是否可用"""
+    _load_project_dotenv()
     try:
         import pytesseract
+        # 支持环境变量直接指定 tesseract.exe 路径（避免强依赖 PATH）
+        tesseract_cmd = os.getenv("TESSERACT_CMD", "").strip()
+        if tesseract_cmd:
+            try:
+                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+            except Exception:
+                pass
         # 尝试获取 tesseract 版本
         pytesseract.get_tesseract_version()
         return True, ""
@@ -58,13 +84,23 @@ def capture_screen(region: tuple[int, int, int, int] | None = None):
     return screenshot
 
 
-def ocr_screen(region: tuple[int, int, int, int] | None = None, lang: str = 'chi_sim+eng') -> dict[str, Any]:
+def ocr_screen(
+    region: tuple[int, int, int, int] | None = None,
+    lang: str = "chi_sim+eng",
+    *,
+    min_confidence: int = 60,
+    scale: float = 1.0,
+    tesseract_config: str | None = None,
+) -> dict[str, Any]:
     """
     OCR 识别屏幕文字
     
     Args:
         region: (left, top, width, height) 或 None（全屏）
         lang: 'chi_sim+eng'（中英文），'eng'（仅英文），'chi_sim'（仅中文）
+        min_confidence: 词块最低置信度（0–100）；微信等场景英文常低于 60，可降到 15–30
+        scale: 截图放大倍数（>1 有利于小字号英文）
+        tesseract_config: 传给 pytesseract 的额外 config（如 --psm 6）
     
     Returns:
         {
@@ -77,6 +113,7 @@ def ocr_screen(region: tuple[int, int, int, int] | None = None, lang: str = 'chi
             ]
         }
     """
+    _load_project_dotenv()
     # 检查依赖
     ok, err = _check_dependencies()
     if not ok:
@@ -96,39 +133,75 @@ def ocr_screen(region: tuple[int, int, int, int] | None = None, lang: str = 'chi
     try:
         import pytesseract
         from PIL import Image
+        # 同样支持环境变量指定 tesseract.exe 路径
+        tesseract_cmd = os.getenv("TESSERACT_CMD", "").strip()
+        if tesseract_cmd:
+            try:
+                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+            except Exception:
+                pass
         
         screenshot = capture_screen(region)
-        
+        if scale and float(scale) != 1.0:
+            w, h = screenshot.size
+            nw = max(1, int(w * float(scale)))
+            nh = max(1, int(h * float(scale)))
+            try:
+                resample = Image.Resampling.LANCZOS
+            except AttributeError:
+                resample = Image.LANCZOS  # type: ignore[attr-defined]
+            screenshot = screenshot.resize((nw, nh), resample)
+
+        cfg = (tesseract_config or "").strip() or None
+
         # OCR 识别完整文本
-        text = pytesseract.image_to_string(screenshot, lang=lang)
-        
+        text = pytesseract.image_to_string(screenshot, lang=lang, config=cfg)
+
         # OCR 识别详细数据（位置 + 置信度）
         data = pytesseract.image_to_data(
             screenshot,
             lang=lang,
-            output_type=pytesseract.Output.DICT
+            output_type=pytesseract.Output.DICT,
+            config=cfg,
         )
-        
+
         blocks = []
-        for i in range(len(data['text'])):
-            conf = int(data['conf'][i])
-            if conf > 60 and data['text'][i].strip():  # 置信度>60 且有内容
-                blocks.append({
-                    "text": data['text'][i].strip(),
+        for i in range(len(data["text"])):
+            conf = int(data["conf"][i])
+            if conf < 0 or conf < min_confidence:
+                continue
+            word = (data["text"][i] or "").strip()
+            if not word:
+                continue
+            blocks.append(
+                {
+                    "text": word,
                     "bbox": [
-                        data['left'][i],
-                        data['top'][i],
-                        data['width'][i],
-                        data['height'][i]
+                        data["left"][i],
+                        data["top"][i],
+                        data["width"][i],
+                        data["height"][i],
                     ],
-                    "confidence": conf
-                })
-        
+                    "confidence": conf,
+                }
+            )
+
+        if scale and float(scale) != 1.0:
+            inv = 1.0 / float(scale)
+            for b in blocks:
+                bb = b["bbox"]
+                b["bbox"] = [
+                    int(round(bb[0] * inv)),
+                    int(round(bb[1] * inv)),
+                    int(round(bb[2] * inv)),
+                    int(round(bb[3] * inv)),
+                ]
+
         return {
             "success": True,
             "error": None,
             "text": text.strip(),
-            "blocks": blocks
+            "blocks": blocks,
         }
         
     except Exception as e:

@@ -217,10 +217,15 @@ The system automatically selects the effort level based on task type, or you can
 - `GET /api/get_methodologies`: Get all methodologies
 - `POST /api/search_methodology`: Search methodologies
 - `POST /api/create_methodology`: Create methodology
+- `POST /api/import_methodologies`: Import methodologies with pre-check
 - `POST /api/update_methodology_category`: Update category
 - `DELETE /api/delete_methodology`: Delete single methodology
 - `POST /api/delete_methodologies_batch`: Batch delete
 - `GET /api/methodology_health`: Methodology health dashboard (quality/AB stats)
+- `GET /api/experience_hub_data`: Skills Hub aggregate data (recommended skills / alerts / regression snapshot)
+- `GET /api/experience_recent_successes`: Recent successful conversations for draft generation
+- `POST /api/create_skill_draft_from_recent`: Generate skill draft from recent success
+- `POST /api/experience_metrics/event`: Record hub behavior metrics
 
 ## Usage Examples
 
@@ -289,7 +294,27 @@ Use built-in benchmark tasks to validate planner coverage and risk-layer behavio
 python scripts/run_regression_benchmark.py
 ```
 
+Optional quality gate:
+
+```bash
+python scripts/run_regression_benchmark.py --min-match-rate 0.6 --min-strict-pass-rate 0.5
+```
+
 Report is written to `data/benchmarks/latest_regression_report.json`.
+
+### Skills Hub (Experience Center v2)
+
+- Experience Center is upgraded to **Skills Hub**:
+  - top recommended skills
+  - inline quality + regression signals
+  - one-click reuse / plan bootstrap
+- New authoring workflow:
+  - `New Method` creates a draft editor
+  - `从最近成功任务生成草稿` bootstraps a draft from recent conversation outcomes
+  - import supports JSON array pre-check (missing fields / duplicate event key)
+- Product metrics file:
+  - `data/experience_center_metrics.json`
+  - tracks events such as tab open, reuse click, draft save, import, rollback
 
 ## Important Notes
 
