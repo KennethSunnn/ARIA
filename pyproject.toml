@@ -1,0 +1,31 @@
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+include = ["scripts/**/*.py", "tests/**/*.py", "aria_manager.py", "web_app.py", "config.py", "method_lib.py", "conversation_lib.py", "chat_attachments.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501", "E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+follow_imports = "skip"
+disable_error_code = ["import-untyped"]
+files = [
+  "scripts/run_regression_benchmark.py",
+  "scripts/react_api_sanity_check.py",
+  "scripts/harness_housekeeping.py",
+  "scripts/ci_bounded_retry.py",
+  "tests",
+]

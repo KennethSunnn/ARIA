@@ -4,6 +4,7 @@ ARIA is an LLM-powered Autonomous Recursive Intelligent Agent that understands n
 
 ## Recent Updates (2026-03-31)
 
+- Implemented **ReAct** execution mode (Thought → Action → Observation loop): enable in the web UI (Settings) or send `react_mode: true` with `/api/process_input`; max steps via `ARIA_REACT_MAX_STEPS` (default 20).
 - Added a clear action risk policy (`safe` / `medium` / `high`) and confirmation behavior.
 - Added methodology health API endpoint: `GET /api/methodology_health`.
 - Added regression benchmark script: `scripts/run_regression_benchmark.py`.
@@ -11,6 +12,8 @@ ARIA is an LLM-powered Autonomous Recursive Intelligent Agent that understands n
 - Upgraded Experience Center to **Skills Hub** with recommended skills, inline health signals, and one-click reuse.
 - Added hub APIs for aggregation, draft generation from recent successes, import pre-check, and event metrics.
 - Added benchmark strict gate fields (`strict_pass_rate`, `strict_ok`) and CLI threshold checks.
+- Added workspace mode support for product/domain isolation: `aria` and `aria_engineer_autocad`.
+- Added ARIA Engineer (AutoCAD-first) implementation docs under `docs/aria_engineer/`.
 
 ## Core Features
 
@@ -24,6 +27,7 @@ ARIA is an LLM-powered Autonomous Recursive Intelligent Agent that understands n
 - 🧪 **Harness Feedback Loop**: Uses benchmark/health signals to drive recommendation confidence
 - 🔍 **OCR Screen Recognition**: Automatically recognizes screen content for intelligent operations
 - 📊 **Multimodal Support**: Image upload and understanding (requires vision-capable models)
+- 🧱 **CAD Attachment Intake (MVP)**: Supports uploading `dxf`/`dwg`; `dxf` provides lightweight layer/entity summary, `dwg` provides capability hint
 
 ## System Architecture
 
@@ -177,10 +181,12 @@ Core workflow:
 - `REASONING_EFFORT_DEFAULT`: Default reasoning effort level (minimal/low/medium/high)
 - `ARIA_REASONING_ROUTER`: Lightweight model router switch
 - `ARIA_TEMPORAL_METHOD_MATCH_FLOOR`: Temporal task methodology matching threshold (default 0.45)
+- `ARIA_DEFAULT_WORKSPACE_MODE`: Server default workspace mode (`aria` / `aria_engineer_autocad`)
 - `ARIA_PLAYWRIGHT`: Enable real browser automation (set to 1)
 - `ARIA_DESKTOP_UIA`: Enable desktop shortcuts/input (set to 1)
 - `ARIA_WECHAT_PREFER_DESKTOP`: Prefer desktop WeChat client (set to 1)
 - `ARIA_ACTION_SCREENSHOT`: Auto full-screen screenshot after actions (set to 1)
+- `ARIA_REACT_MAX_STEPS`: Max ReAct iterations per execution session (default 20)
 
 ### Action Risk Policy (safe / medium / high)
 
@@ -205,7 +211,7 @@ The system automatically selects the effort level based on task type, or you can
 
 ### Core Endpoints
 
-- `POST /api/process_input`: Process user input (supports multipart forms and file uploads)
+- `POST /api/process_input`: Process user input (supports multipart forms and file uploads). Optional JSON/form field `react_mode` enables ReAct-style step-by-step execution after confirmation (see `.env.example` for `ARIA_REACT_MAX_STEPS`).
 - `POST /api/confirm_actions`: Confirm action plan execution
 - `POST /api/execution/start`: Start execution directly
 - `POST /api/execution/pause`: Pause execution
@@ -275,6 +281,22 @@ ARIA workflow:
 
 ## Development Guide
 
+### Harness Baseline
+
+- `AGENTS.md`: runtime guardrails index (keep concise, directory style)
+- `pyproject.toml`: unified lint/type/test config (`ruff` / `mypy` / `pytest`)
+- `.pre-commit-config.yaml`: local hard checks before commits
+- `.github/workflows/ci.yml`: lint + type + test + regression benchmark gate
+- `.github/workflows/housekeeping.yml`: weekly drift and quality housekeeping
+
+### ARIA Engineer (AutoCAD First)
+
+- Boundaries and allowlist: `docs/aria_engineer/01-boundaries-and-allowlist.md`
+- Monorepo migration map: `docs/aria_engineer/02-monorepo-migration-map.md`
+- AutoCAD MVP contracts: `docs/aria_engineer/03-autocad-mvp-contracts.md`
+- Workspace mode UX: `docs/aria_engineer/04-workspace-mode-ux.md`
+- Release gates: `docs/aria_engineer/05-release-gates.md`
+
 ### Adding New Automation Capabilities
 
 1. Create a new driver module in `automation/` directory
@@ -328,6 +350,12 @@ Report is written to `data/benchmarks/latest_regression_report.json`.
 ### Quick Verification Checklist
 
 ```bash
+# 0) Install quality tools
+pip install ruff mypy pytest pre-commit
+
+# 0.1) Optional: enable local commit hooks
+pre-commit install
+
 # 1) Start web app
 python web_app.py
 
@@ -336,6 +364,12 @@ curl http://localhost:5000/api/experience_hub_data
 
 # 3) Run benchmark and enforce gate
 python scripts/run_regression_benchmark.py --min-match-rate 0.6 --min-strict-pass-rate 0.5
+
+# 4) ReAct API sanity check (requires running web_app.py)
+python scripts/react_api_sanity_check.py --base-url http://127.0.0.1:5000
+
+# 5) Weekly housekeeping (docs/rules/quality drift)
+python scripts/harness_housekeeping.py --min-strict-pass-rate 0.6
 ```
 
 ## Important Notes

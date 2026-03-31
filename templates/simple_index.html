@@ -36,6 +36,11 @@
             font-family: 'SourceHanSans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             color: var(--text);
         }
+        body.workspace-mode-engineer {
+            --primary: #0f766e;
+            --primary-soft: rgba(15, 118, 110, 0.12);
+            --focus-ring: 0 0 0 3px rgba(15, 118, 110, 0.22);
+        }
         .top-nav {
             position: sticky;
             top: 0;
@@ -54,6 +59,15 @@
         }
         .tab-content {
             margin-top: 20px;
+        }
+        #workspace-mode-banner {
+            margin: 10px 16px 0;
+            padding: 8px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(15, 118, 110, 0.28);
+            background: rgba(15, 118, 110, 0.08);
+            color: #0f766e;
+            font-size: 13px;
         }
         #main-tab-content {
             display: flex;
@@ -161,6 +175,59 @@
             font-size: 14px;
             line-height: 1.5;
             box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+        }
+        .clarify-choice-list {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .clarify-choice-btn {
+            min-height: 44px;
+            transition: opacity 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .clarify-choice-btn {
+                transition: none;
+            }
+        }
+        .clarify-choice-btn.clarify-choice-dimmed {
+            opacity: 0.42;
+        }
+        .clarify-choice-btn.clarify-choice-selected {
+            opacity: 1;
+            background-color: var(--primary);
+            border-color: var(--primary);
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+        }
+        .clarify-choice-btn:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+        .clarify-choice-card.clarify-choice-collapsed .clarify-choice-expanded {
+            display: none;
+        }
+        .clarify-choice-collapsed-summary {
+            font-size: 13px;
+            color: #475569;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+        .clarify-choice-collapsed-summary-inner {
+            align-items: flex-start;
+        }
+        .clarify-choice-collapsed-text {
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+        .clarify-choice-change-btn {
+            flex-shrink: 0;
+            font-weight: 600;
         }
         .chat-card-footer {
             padding-top: 10px;
@@ -733,6 +800,12 @@
             background: var(--primary-soft);
             border: 1px solid rgba(37, 99, 235, 0.16);
         }
+        #workspace-mode-badge {
+            max-width: min(72vw, 340px);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
         button,
         .btn,
         .form-control,
@@ -1056,6 +1129,18 @@
                 margin-top: 12px;
             }
         }
+        @media (max-width: 767.98px) {
+            .top-nav .row {
+                row-gap: 8px;
+            }
+            .top-nav .workspace-meta {
+                justify-content: flex-start !important;
+                flex-wrap: wrap;
+            }
+            #workspace-mode-badge {
+                max-width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1073,15 +1158,19 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-md-6 text-right">
-                    <div class="d-inline-flex align-items-center gap-2">
+                <div class="col-md-6 mt-2 mt-md-0">
+                    <div class="d-inline-flex align-items-center justify-content-md-end gap-2 workspace-meta">
                         <div data-lang-switcher></div>
                         <span class="app-badge"><i class="fa fa-magic" style="margin-right:6px;"></i> ARIA v2</span>
+                        <span class="app-badge" id="workspace-mode-badge">Workspace: ARIA</span>
                     </div>
                 </div>
             </div>
         </div>
     </nav>
+    <div id="workspace-mode-banner" class="d-none">
+        Engineering mode is active. CAD-safe tool allowlist is enforced.
+    </div>
 
     <!-- 标签页导航 -->
     <div class="tab-nav">
@@ -1120,6 +1209,10 @@
                             <div class="d-flex justify-content-between align-items-center">
                                 <h5 id="chat-panel-title" class="card-title mb-0 panel-title" data-i18n="app.panel.chat">Chat</h5>
                                 <div class="d-flex align-items-center gap-2 panel-controls">
+                                    <button class="btn btn-primary btn-sm" type="button" id="chat-new-agent-btn"
+                                        data-i18n="app.panel.newAgentTitle" data-i18n-attr="title" title="Create new agent task">
+                                        <i class="fa fa-plus"></i> <span data-i18n="app.agent.new">New Agent</span>
+                                    </button>
                                     <button class="btn btn-outline-secondary btn-sm" id="chat-clear-btn" type="button">
                                         <i class="fa fa-trash"></i> <span data-i18n="common.clear">Clear</span>
                                     </button>
@@ -1211,7 +1304,7 @@
                             <div class="text-center text-muted" id="execution-empty-hint">
                                 <span data-i18n="app.empty.logs">No logs yet. Send a task to view process.</span>
                             </div>
-                        </div>
+                    </div>
                     </div>
                 </div>
 
@@ -1222,12 +1315,8 @@
                     <div class="card panel-card" id="panel-card-left">
                         <div class="card-header">
                             <div class="d-flex justify-content-between align-items-center">
-                                <h5 class="card-title mb-0 panel-title" data-i18n="app.panel.sessions">Sessions</h5>
+                                <h5 class="card-title mb-0 panel-title" data-i18n="app.panel.history">Task History</h5>
                                 <div class="d-flex align-items-center gap-2 panel-controls">
-                                    <button class="btn btn-primary btn-sm" id="new-conversation-btn" type="button"
-                                        data-i18n="app.panel.newConversationTitle" data-i18n-attr="title" title="New conversation">
-                                        <i class="fa fa-plus"></i> <span data-i18n="common.new">New</span>
-                                    </button>
                                     <button class="btn btn-outline-secondary btn-sm panel-collapse-btn" data-panel="left" type="button"
                                         data-i18n="app.panel.hideSessions" data-i18n-attr="title" title="Hide sessions column">
                                         <i class="fa fa-minus"></i>
@@ -1384,6 +1473,21 @@
                             </label>
                         </div>
                         <p class="text-muted small mt-2 mb-0" data-i18n="app.settings.actionScreenshotsEnvHint">You can also enable this with ARIA_ACTION_SCREENSHOT=1 in .env (either setting is enough).</p>
+                        <div class="form-check mt-3">
+                            <input class="form-check-input" type="checkbox" id="aria-react-mode" autocomplete="off">
+                            <label class="form-check-label" for="aria-react-mode" data-i18n="app.settings.reactMode">
+                                ReAct mode: plan one step at a time (Thought → Action → Observation) after you confirm
+                            </label>
+                        </div>
+                        <p class="text-muted small mt-2 mb-0" data-i18n="app.settings.reactModeHint">Uses more LLM calls; cap iterations with ARIA_REACT_MAX_STEPS in .env.</p>
+                        <div class="mt-3">
+                            <label class="form-label mb-1" for="aria-workspace-mode" data-i18n="app.settings.workspaceModeTitle">Workspace Mode</label>
+                            <select class="form-select form-select-sm" id="aria-workspace-mode">
+                                <option value="aria" data-i18n="app.workspaceMode.aria">ARIA (General Assistant)</option>
+                                <option value="aria_engineer_autocad" data-i18n="app.workspaceMode.engineerAutocad">ARIA Engineer (AutoCAD)</option>
+                            </select>
+                            <p class="text-muted small mt-2 mb-0" data-i18n="app.settings.workspaceModeHint">Switching mode changes tool allowlist and planning behavior. ARIA Engineer blocks social/messaging actions by default.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1427,6 +1531,7 @@
             window.addEventListener('aria:localeChanged', function() {
                 applyChatWelcomeVisibility();
                 if (window.ariaI18n) window.ariaI18n.apply(document.querySelector('#panel-card-center'));
+                renderWorkspaceModeBadge(getWorkspaceMode());
             });
             function formatTokenUsageLine(tu) {
                 if (!tu) return '';
@@ -1462,6 +1567,8 @@
             let nextSendAsNewTask = false;
             /** 待随下一条消息一并上传的文件（最多 8 个） */
             const MAX_PENDING_CHAT_FILES = 8;
+            const conversationExecutionSessionMap = {};
+            const conversationRequestMap = {};
             let pendingChatFiles = [];
             let pendingWorkflowEvents = [];
             let currentRequestId = null;
@@ -1483,8 +1590,9 @@
             let showStoryExecutionDetails = false;
             let storyViewMode = 'compact'; // compact | detailed
             let storyDragState = { active: false, startY: 0, startTop: 0 };
+            let rightPanelView = 'logs';
             const panelState = {
-                left: { collapsed: false },
+                left: { collapsed: true },
                 center: { collapsed: false },
                 right: { collapsed: false },
             };
@@ -1538,6 +1646,37 @@
                 return $('<div/>').text(str == null ? '' : String(str)).html();
             }
 
+            function normalizeWorkspaceModeClient(mode) {
+                const raw = String(mode || '').trim().toLowerCase().replace(/-/g, '_');
+                if (raw === 'aria_engineer' || raw === 'engineer' || raw === 'autocad') return 'aria_engineer_autocad';
+                if (raw === 'aria' || raw === 'aria_engineer_autocad') return raw;
+                return 'aria';
+            }
+
+            function workspaceModeLabel(mode) {
+                const normalized = normalizeWorkspaceModeClient(mode);
+                if (normalized === 'aria_engineer_autocad') {
+                    return tr('app.workspaceMode.engineerAutocad', 'ARIA Engineer (AutoCAD)');
+                }
+                return tr('app.workspaceMode.aria', 'ARIA (General Assistant)');
+            }
+
+            function renderWorkspaceModeBadge(mode) {
+                const label = workspaceModeLabel(mode);
+                const prefix = tr('app.workspaceMode.badgePrefix', 'Workspace');
+                $('#workspace-mode-badge').text(`${prefix}: ${label}`);
+                const normalized = normalizeWorkspaceModeClient(mode);
+                const isEngineer = normalized === 'aria_engineer_autocad';
+                $('body').toggleClass('workspace-mode-engineer', isEngineer);
+                if (isEngineer) {
+                    $('#workspace-mode-banner')
+                        .removeClass('d-none')
+                        .text(tr('app.workspaceMode.engineerBanner', 'Engineering mode is active. CAD-safe tool allowlist is enforced.'));
+                } else {
+                    $('#workspace-mode-banner').addClass('d-none');
+                }
+            }
+
             function formatTimestamp(ts) {
                 if (!ts) return '';
                 try {
@@ -1546,6 +1685,45 @@
                 } catch (e) {
                     return '';
                 }
+            }
+
+            function formatBytes(size) {
+                const s = Number(size || 0);
+                if (!Number.isFinite(s) || s <= 0) return '0 B';
+                const units = ['B', 'KB', 'MB', 'GB'];
+                let v = s;
+                let i = 0;
+                while (v >= 1024 && i < units.length - 1) {
+                    v /= 1024;
+                    i += 1;
+                }
+                return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+            }
+
+            function setRightPanelView(view) {
+                rightPanelView = 'logs';
+                $('#execution-log-area').removeClass('d-none');
+            }
+
+            function displayStageName(stage) {
+                const s = String(stage || '').trim();
+                if (!s) return tr('app.stream.execEvent', 'Execution Event');
+                const map = {
+                    task_parse: tr('app.stream.stage.task_parse', 'Parse'),
+                    task_split: tr('app.stream.stage.task_split', 'Dispatch'),
+                    agent_execute: tr('app.stream.stage.agent_execute', 'Execute'),
+                    quality_check: tr('app.stream.stage.quality_check', 'QA'),
+                    method_save: tr('app.stream.stage.method_save', 'Save method'),
+                    agent_destroy: tr('app.stream.stage.agent_destroy', 'Complete'),
+                    task_cancelled: tr('app.stream.stage.task_cancelled', 'Cancelled'),
+                    react_session_start: tr('app.stream.stage.react_session_start', 'ReAct start'),
+                    react_iteration: tr('app.stream.stage.react_iteration', 'ReAct iteration'),
+                    react_thought: tr('app.stream.stage.react_thought', 'Thought'),
+                    react_action: tr('app.stream.stage.react_action', 'Action'),
+                    react_observation: tr('app.stream.stage.react_observation', 'Observation'),
+                    react_complete: tr('app.stream.stage.react_complete', 'ReAct complete'),
+                };
+                return map[s] || s;
             }
 
             function roleBadge(role) {
@@ -1669,7 +1847,7 @@
                 ['left', 'center', 'right'].forEach((key) => {
                     if (maxPanel ? key !== maxPanel : panelState[key].collapsed) collapsed.push(key);
                 });
-                const nameMap = { left: tr('app.panel.sessions', 'Sessions'), center: tr('app.panel.chat', 'Chat'), right: tr('app.panel.collab', 'Collaboration Log') };
+                const nameMap = { left: tr('app.panel.history', 'Task History'), center: tr('app.panel.chat', 'Chat'), right: tr('app.panel.collab', 'Collaboration Log') };
                 const $bar = $('#collapsed-panels-bar');
                 $bar.empty();
                 collapsed.forEach((key) => {
@@ -1687,11 +1865,11 @@
                 const opts = options || {};
                 const showDetails = !!opts.showDetails;
                 const milestonesOnly = !!opts.milestonesOnly;
-                const milestoneStages = new Set(['task_parse', 'task_split', 'quality_check', 'method_save', 'agent_destroy', 'task_cancelled']);
+                const milestoneStages = new Set(['task_parse', 'task_split', 'quality_check', 'method_save', 'agent_destroy', 'task_cancelled', 'react_session_start', 'react_complete']);
                 const sorted = [...(events || [])].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                 return sorted.filter((evt) => {
                     if (!evt) return false;
-                    if (evt.stage === 'agent_execute') return showDetails;
+                    if (evt.stage === 'agent_execute' || evt.stage === 'react_iteration') return showDetails;
                     if (milestonesOnly) return milestoneStages.has(evt.stage);
                     return true;
                 });
@@ -1709,11 +1887,11 @@
                     return;
                 }
                 const timelineEvents = buildTimelineEvents(events, { showDetails: true, milestonesOnly: false });
-                const taskSplit = timelineEvents.find((evt) => evt.stage === 'task_split');
-                const executeEvents = timelineEvents.filter((evt) => evt.stage === 'agent_execute');
+                const taskSplit = timelineEvents.find((evt) => evt.stage === 'task_split' || evt.stage === 'react_session_start');
+                const executeEvents = timelineEvents.filter((evt) => evt.stage === 'agent_execute' || evt.stage === 'react_action');
                 const qualityEvt = [...timelineEvents].reverse().find((evt) => evt.stage === 'quality_check');
                 const saveEvt = [...timelineEvents].reverse().find((evt) => evt.stage === 'method_save');
-                const doneEvt = [...timelineEvents].reverse().find((evt) => evt.stage === 'agent_destroy');
+                const doneEvt = [...timelineEvents].reverse().find((evt) => evt.stage === 'agent_destroy' || evt.stage === 'react_complete');
                 if (!taskSplit && !executeEvents.length) {
                     $graph.html(`<div class="text-muted">${tr('app.story.noDispatchData', 'No dispatch visualization data yet.')}</div>`);
                     return;
@@ -1774,7 +1952,8 @@
                         const ey = y + j * (eventH + 8);
                         const statusCls = evt.status === 'success' ? 'event-success' : (evt.status === 'error' ? 'event-error' : 'event-running');
                         const eventAttr = evt.event_id ? `data-event-id="${escapeHtml(evt.event_id)}"` : '';
-                        const title = evt.summary || evt.stage || tr('app.stream.execEvent', 'Execution Event');
+                        const stageLabel = displayStageName(evt.stage);
+                        const title = evt.summary ? `${stageLabel} · ${evt.summary}` : stageLabel;
                         svg.push(`<path class="story-bubble-link" d="M ${agentX + agentW} ${y + agentH / 2} C 590 ${y + agentH / 2}, 600 ${ey + eventH / 2}, ${eventX} ${ey + eventH / 2}"></path>`);
                         svg.push(`<g class="story-node story-node-event ${statusCls}" ${eventAttr}><rect x="${eventX}" y="${ey}" width="${eventW}" height="${eventH}" rx="10" ry="10"></rect><text x="${eventX + 10}" y="${ey + 22}">${escapeHtml(clipText(title, 20))}</text><text class="node-sub" x="${eventX + 10}" y="${ey + 42}">${escapeHtml(clipText(formatTimestamp(evt.timestamp), 20))}</text></g>`);
                     });
@@ -1801,7 +1980,7 @@
                         } else if (prevX !== null && prevY !== null) {
                             svg.push(`<path class="story-bubble-link" d="M ${prevX + closeW} ${prevY + closeH / 2} C 1120 ${prevY + closeH / 2}, 1120 ${y + closeH / 2}, ${x} ${y + closeH / 2}"></path>`);
                         }
-                        const sub = node.evt.summary || node.evt.stage || node.label;
+                        const sub = node.evt.summary || displayStageName(node.evt.stage) || node.label;
                         svg.push(`<g class="story-node story-node-event ${statusCls}" ${eventAttr}><rect x="${x}" y="${y}" width="${closeW}" height="${closeH}" rx="10" ry="10"></rect><text x="${x + 10}" y="${y + 22}">${escapeHtml(node.label)}</text><text class="node-sub" x="${x + 10}" y="${y + 41}">${escapeHtml(clipText(sub, 12))}</text></g>`);
                         prevX = x;
                         prevY = y;
@@ -1860,7 +2039,7 @@
                                 <div class="text-muted">${statusText}</div>
                             </div>
                         </div>
-                        <div class="event-chat-content">${escapeHtml(evt.summary || evt.stage || '')}</div>
+                        <div class="event-chat-content">${escapeHtml(evt.summary || displayStageName(evt.stage) || '')}</div>
                         ${reasonHtml}
                         <div class="text-primary mt-1" style="font-size:11px;cursor:pointer;" data-detail-toggle="1">${tr('app.stream.expandDetail', 'Expand detail')}</div>
                         <div class="event-chat-detail">${detailHtml}</div>
@@ -2263,10 +2442,6 @@
                         success: function(resp) {
                             const list = resp.conversations || [];
                             renderConversationList(list);
-                            if (!list.length && !currentConversationId) {
-                                createConversation(tr('app.session.newDefault', 'New Session'));
-                                return;
-                            }
                             if (!currentConversationId && list.length) {
                                 loadConversationDetail(list[0].conversation_id);
                             }
@@ -2304,9 +2479,13 @@
                             }
                         }
                         currentTaskId = restoredTaskId || null;
+                        currentRequestId = conversationRequestMap[currentConversationId] || currentRequestId;
                         nextSendAsNewTask = false;
                         const lastMeta = messages.length ? (messages[messages.length - 1].meta || {}) : {};
-                        currentExecutionSessionId = lastMeta.execution_session_id || currentExecutionSessionId;
+                        currentExecutionSessionId = lastMeta.execution_session_id || conversationExecutionSessionMap[currentConversationId] || currentExecutionSessionId;
+                        if (currentExecutionSessionId) {
+                            conversationExecutionSessionMap[currentConversationId] = currentExecutionSessionId;
+                        }
                         if (lastMeta.pending_actions && (lastMeta.pending_actions.actions || []).length) {
                             renderPendingActionsCard(lastMeta.pending_actions);
                         }
@@ -2332,7 +2511,7 @@
                 });
             }
 
-            function createConversation(title = tr('app.session.newDefault', 'New Session')) {
+            function createConversation(title = tr('app.session.newAgentDefault', 'New Agent Task')) {
                 $.ajax({
                     url: '/api/conversations',
                     type: 'POST',
@@ -2343,7 +2522,9 @@
                         if (!conv.conversation_id) return;
                         currentConversationId = conv.conversation_id;
                         currentTaskId = null;
+                        currentRequestId = conversationRequestMap[currentConversationId] || null;
                         nextSendAsNewTask = false;
+                        currentExecutionSessionId = conversationExecutionSessionMap[currentConversationId] || null;
                         renderConversationMessages([]);
                         renderWorkflowAndLogs([], []);
                         loadConversations();
@@ -2801,18 +2982,82 @@
                 return `<ol class="mb-2" style="padding-left:18px;">${items}</ol>`;
             }
 
+            function clarifyChoiceFeedbackDelayMs() {
+                try {
+                    return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 80 : 180;
+                } catch (e) {
+                    return 180;
+                }
+            }
+
+            function expandClarifyChoiceCard($card) {
+                if (!$card.length || !$card.hasClass('clarify-choice-collapsed')) return;
+                $card.removeClass('clarify-choice-collapsed');
+                const $btns = $card.find('.clarify-choice-btn');
+                $btns.removeClass('clarify-choice-selected clarify-choice-dimmed');
+                $btns.attr('aria-checked', 'false');
+                $btns.prop('disabled', false);
+                $btns.each(function(i) {
+                    $(this).attr('tabindex', i === 0 ? '0' : '-1');
+                });
+                $card.find('.clarify-choice-collapsed-summary').addClass('d-none').attr('aria-hidden', 'true');
+                $card.find('.clarify-choice-expanded').attr('aria-hidden', 'false');
+                $btns.first().trigger('focus');
+            }
+
+            function submitClarifyChoiceFromButton($btn) {
+                const $card = $btn.closest('.clarify-choice-card');
+                if (!$card.length || $btn.prop('disabled')) return;
+                const id = ($btn.attr('data-choice-id') || '').trim();
+                const label = ($btn.text() || '').trim();
+                if (!id) return;
+                $card.find('.clarify-choice-btn').each(function() {
+                    const $b = $(this);
+                    const isSel = $b[0] === $btn[0];
+                    $b.toggleClass('clarify-choice-selected', isSel);
+                    $b.toggleClass('clarify-choice-dimmed', !isSel);
+                    $b.attr('aria-checked', isSel ? 'true' : 'false');
+                });
+                $card.find('.clarify-choice-btn').prop('disabled', true);
+                $('#chat-text-input').val(label ? ('我选：' + id + '（' + label + '）') : ('我选：' + id));
+                const delayMs = clarifyChoiceFeedbackDelayMs();
+                const pickedLabel = label || id;
+                setTimeout(function() {
+                    $card.addClass('clarify-choice-collapsed');
+                    const summaryLine = tf('app.clarify.collapsedSummary', { label: pickedLabel }, 'Selected: ' + pickedLabel);
+                    const $sum = $card.find('.clarify-choice-collapsed-summary');
+                    $card.find('.clarify-choice-collapsed-text').text(summaryLine);
+                    $sum.removeClass('d-none');
+                    $card.find('.clarify-choice-expanded').attr('aria-hidden', 'true');
+                    $sum.attr('aria-hidden', 'false');
+                    sendMessage();
+                }, delayMs);
+            }
+
             function renderClarifyChoicesCard(choices) {
                 if (!choices || !choices.length) return;
                 const $chat = $('#chat .chat-area');
-                const btns = choices.map(function(c) {
+                const headingId = 'clarify-choice-h-' + Date.now();
+                const headingText = escapeHtml(tr('app.clarify.pickOption', 'Quick options (click to reply):'));
+                const changeBtnLabel = escapeHtml(tr('app.clarify.changeSelection', 'Change selection'));
+                const btns = choices.map(function(c, idx) {
                     const label = escapeHtml(String(c.label || c.id || ''));
-                    return `<button type="button" class="btn btn-sm btn-outline-primary clarify-choice-btn me-1 mb-1" data-choice-id="${escapeHtml(String(c.id || ''))}">${label}</button>`;
+                    const tabIdx = idx === 0 ? '0' : '-1';
+                    return `<button type="button" role="radio" aria-checked="false" tabindex="${tabIdx}" class="btn btn-sm btn-outline-primary clarify-choice-btn w-100 text-start" data-choice-id="${escapeHtml(String(c.id || ''))}">${label}</button>`;
                 }).join('');
                 $chat.append(`
                     <div class="chat-message ai-message clarify-choice-card">
                         <div class="message-content">
-                            <div class="text-muted small mb-1">${escapeHtml(tr('app.clarify.pickOption', 'Quick options (click to reply):'))}</div>
-                            <div class="d-flex flex-wrap align-items-center" style="gap:6px;">${btns}</div>
+                            <div class="clarify-choice-expanded">
+                                <div class="text-muted small mb-1" id="${headingId}">${headingText}</div>
+                                <div class="clarify-choice-list d-flex flex-column" role="radiogroup" aria-labelledby="${headingId}">${btns}</div>
+                            </div>
+                            <div class="clarify-choice-collapsed-summary d-none" aria-hidden="true">
+                                <div class="d-flex flex-wrap clarify-choice-collapsed-summary-inner justify-content-between gap-2">
+                                    <span class="clarify-choice-collapsed-text" role="status"></span>
+                                    <button type="button" class="btn btn-link btn-sm clarify-choice-change-btn py-0">${changeBtnLabel}</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 `);
@@ -2896,6 +3141,9 @@
                             const text = escapeHtml(resp.result || tr('app.actionPlan.executed', 'Actions executed.')).replace(/\n/g, '<br>');
                             $chat.append(`<div class="chat-message ai-message"><div class="message-content">${text}</div></div>`);
                             currentExecutionSessionId = resp.execution_session_id || currentExecutionSessionId;
+                            if (currentConversationId && currentExecutionSessionId) {
+                                conversationExecutionSessionMap[currentConversationId] = currentExecutionSessionId;
+                            }
                             if (currentExecutionSessionId) startExecutionStatusPolling();
                             renderWorkflowAndLogs(resp.logs || [], resp.workflow_events || []);
                             loadConversations();
@@ -3085,14 +3333,32 @@
                 function processWithConversationId(convId) {
                     const hasFiles = pendingChatFiles.length > 0;
                     const onSuccess = function(resp) {
+                        if (resp && resp.workspace_mode) {
+                            const normalized = normalizeWorkspaceModeClient(resp.workspace_mode);
+                            $('#aria-workspace-mode').val(normalized);
+                            renderWorkspaceModeBadge(normalized);
+                            try {
+                                localStorage.setItem('aria_workspace_mode', normalized);
+                            } catch (e) { /* ignore */ }
+                        }
                         pendingChatFiles = [];
                         $('#chat-file-input').val('');
                         renderPendingAttachHint();
                         currentConversationId = resp.conversation_id || currentConversationId;
+                        if (currentConversationId) {
+                            conversationRequestMap[currentConversationId] = requestId;
+                        }
                         currentTaskId = resp.task_id || currentTaskId;
                         currentExecutionSessionId = resp.execution_session_id || currentExecutionSessionId;
+                        if (currentConversationId && currentExecutionSessionId) {
+                            conversationExecutionSessionMap[currentConversationId] = currentExecutionSessionId;
+                        }
+                        const delegationNarrative = String(resp.delegation_narrative || '').trim();
+                        const delegationHtml = delegationNarrative
+                            ? `<div class="small text-muted mb-1"><i class="fa fa-user-cog mr-1"></i>${escapeHtml(delegationNarrative)}</div>`
+                            : '';
                         const escaped = escapeHtml(resp.result || '').replace(/\n/g, '<br>');
-                        $('#temp-ai-message .message-content').html(escaped);
+                        $('#temp-ai-message .message-content').html(`${delegationHtml}${escaped}`);
                         if (resp.cancelled) {
                             $('#chat .chat-area').append(
                                 `<div class="chat-message ai-message"><div class="message-content text-warning">${escapeHtml(tr('app.request.cancelled', 'Task cancelled. No further actions will run.'))}</div></div>`
@@ -3144,6 +3410,8 @@
                         fd.append('task_id', currentTaskId || '');
                         fd.append('new_task', sendAsNewTask ? 'true' : 'false');
                         fd.append('action_screenshots', isActionScreenshotsEnabled() ? 'true' : 'false');
+                        fd.append('react_mode', isReactModeEnabled() ? 'true' : 'false');
+                        fd.append('workspace_mode', getWorkspaceMode());
                         pendingChatFiles.forEach(function(f) { fd.append('files', f); });
                         $.ajax({
                             url: '/api/process_input',
@@ -3167,6 +3435,8 @@
                                 task_id: currentTaskId || '',
                                 new_task: !!sendAsNewTask,
                                 action_screenshots: isActionScreenshotsEnabled(),
+                                react_mode: isReactModeEnabled(),
+                                workspace_mode: getWorkspaceMode(),
                             }),
                             success: onSuccess,
                             error: onError,
@@ -3181,7 +3451,7 @@
                         url: '/api/conversations',
                         type: 'POST',
                         contentType: 'application/json',
-                        data: JSON.stringify({ title: tr('app.session.newDefault', 'New Session') }),
+                        data: JSON.stringify({ title: tr('app.session.newAgentDefault', 'New Agent Task') }),
                         success: function(resp) {
                             const conv = resp.conversation || {};
                             currentConversationId = conv.conversation_id || currentConversationId;
@@ -3208,6 +3478,7 @@
             loadApiKeyStatus();
             $.when(loadMethodologies(), loadExperienceHubData()).always(renderMethodologyList);
             loadConversations(true);
+            setRightPanelView('logs');
             adjustChatTextareaHeight();
             setTimeout(function() { focusChatInput(); }, 450);
 
@@ -3223,8 +3494,42 @@
                     } catch (e) { /* ignore */ }
                 });
             })();
+            (function initReactModeToggle() {
+                const $cb = $('#aria-react-mode');
+                try {
+                    $cb.prop('checked', localStorage.getItem('aria_react_mode') === '1');
+                } catch (e) { /* ignore */ }
+                $cb.on('change', function() {
+                    try {
+                        localStorage.setItem('aria_react_mode', this.checked ? '1' : '0');
+                    } catch (e) { /* ignore */ }
+                });
+            })();
+            (function initWorkspaceModeSelector() {
+                const $sel = $('#aria-workspace-mode');
+                let mode = 'aria';
+                try {
+                    mode = normalizeWorkspaceModeClient(localStorage.getItem('aria_workspace_mode') || 'aria');
+                } catch (e) { /* ignore */ }
+                $sel.val(mode);
+                renderWorkspaceModeBadge(mode);
+                $sel.on('change', function() {
+                    const normalized = normalizeWorkspaceModeClient($(this).val());
+                    $(this).val(normalized);
+                    renderWorkspaceModeBadge(normalized);
+                    try {
+                        localStorage.setItem('aria_workspace_mode', normalized);
+                    } catch (e) { /* ignore */ }
+                });
+            })();
             function isActionScreenshotsEnabled() {
                 return $('#aria-action-screenshots').is(':checked');
+            }
+            function isReactModeEnabled() {
+                return $('#aria-react-mode').is(':checked');
+            }
+            function getWorkspaceMode() {
+                return normalizeWorkspaceModeClient($('#aria-workspace-mode').val());
             }
 
             $('#chat-attach-btn').on('click', function() { $('#chat-file-input').trigger('click'); });
@@ -3279,7 +3584,9 @@
                 });
             })();
 
-            $('#new-conversation-btn').click(function() { createConversation(tr('app.session.newDefault', 'New Session')); });
+            $('#chat-new-agent-btn').click(function() {
+                createConversation(tr('app.session.newAgentDefault', 'New Agent Task'));
+            });
             $('#chat-clear-btn').click(function() {
                 if (!currentConversationId) return;
                 renderConversationMessages([]);
@@ -3326,7 +3633,8 @@
                 applyPanelLayout();
             });
             $('#chat-cancel-btn').click(function() {
-                if (!isTaskRunning || !currentRequestId) return;
+                const activeRequestId = (currentConversationId && conversationRequestMap[currentConversationId]) || currentRequestId;
+                if (!isTaskRunning || !activeRequestId) return;
                 const $btn = $('#chat-cancel-btn');
                 if (cancelRequestedForCurrentTask) return;
                 cancelRequestedForCurrentTask = true;
@@ -3339,17 +3647,18 @@
                     url: '/api/cancel_task',
                     type: 'POST',
                     contentType: 'application/json',
-                    data: JSON.stringify({ conversation_id: currentConversationId, request_id: currentRequestId }),
+                    data: JSON.stringify({ conversation_id: currentConversationId, request_id: activeRequestId }),
                     success: function(resp) {
                         if (resp.success) {
                             $('#execution-log-area').append(`<div class="execution-log text-warning">${tr('app.request.cancelSent', 'Cancel request sent. Waiting for task to stop...')}</div>`);
                             // 双保险：若存在异步执行会话，额外请求硬中止，避免“已取消但后续仍执行”。
-                            if (currentExecutionSessionId) {
+                            const activeSessionId = (currentConversationId && conversationExecutionSessionMap[currentConversationId]) || currentExecutionSessionId;
+                            if (activeSessionId) {
                                 $.ajax({
                                     url: '/api/execution/abort',
                                     type: 'POST',
                                     contentType: 'application/json',
-                                    data: JSON.stringify({ session_id: currentExecutionSessionId }),
+                                    data: JSON.stringify({ session_id: activeSessionId }),
                                     success: function() {
                                         $('#execution-log-area').append(`<div class="execution-log text-warning">${escapeHtml(tr('app.exec.abortIssued', 'Execution session abort sent.'))}</div>`);
                                     }
@@ -3376,13 +3685,33 @@
             $('#chat .chat-area').on('click', '.reject-action-btn', function() {
                 rejectPendingActions();
             });
+            $('#chat .chat-area').on('click', '.clarify-choice-change-btn', function(e) {
+                e.preventDefault();
+                expandClarifyChoiceCard($(this).closest('.clarify-choice-card'));
+            });
             $('#chat .chat-area').on('click', '.clarify-choice-btn', function() {
-                const id = ($(this).attr('data-choice-id') || '').trim();
-                const label = ($(this).text() || '').trim();
-                if (!id) return;
-                $('#chat-text-input').val(label ? ('我选：' + id + '（' + label + '）') : ('我选：' + id));
-                $('#chat .chat-area').find('.clarify-choice-card').remove();
-                sendMessage();
+                submitClarifyChoiceFromButton($(this));
+            });
+            $('#chat .chat-area').on('keydown', '.clarify-choice-btn', function(e) {
+                const $list = $(this).closest('.clarify-choice-list');
+                const $btns = $list.find('.clarify-choice-btn').filter(function() { return !$(this).prop('disabled'); });
+                if (!$btns.length) return;
+                const idx = $btns.index(this);
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    let next = idx;
+                    if (e.key === 'ArrowDown') next = Math.min(idx + 1, $btns.length - 1);
+                    else next = Math.max(idx - 1, 0);
+                    $btns.each(function(i) {
+                        $(this).attr('tabindex', i === next ? '0' : '-1');
+                    });
+                    $btns.eq(next).focus();
+                    return;
+                }
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    submitClarifyChoiceFromButton($(this));
+                }
             });
             $('#execution-log-area').on('click', '.exec-pause-btn', function() { callExecutionControl('pause'); });
             $('#execution-log-area').on('click', '.exec-resume-btn', function() { callExecutionControl('resume'); });
@@ -3825,6 +4154,7 @@
                 applyMethodFilterOptions();
                 applyPanelLayout();
                 renderWorkflowAndLogs(currentLogs || [], currentWorkflowEvents || []);
+                setRightPanelView(rightPanelView);
                 loadApiKeyStatus();
                 loadConversations(true);
                 $.when(loadMethodologies(), loadExperienceHubData()).always(renderMethodologyList);

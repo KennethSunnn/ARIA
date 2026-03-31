@@ -56,6 +56,8 @@ ALLOWED_EXTENSIONS = frozenset(
         "xlsx",
         "xlsm",
         "pptx",
+        "dxf",
+        "dwg",
     }
 )
 
@@ -218,6 +220,12 @@ def _extract_one_file(full: Path, display_name: str, ext: str) -> str:
     if ext == "pptx":
         return _try_pptx_text(full)
 
+    if ext == "dxf":
+        return _try_dxf_summary(full)
+
+    if ext == "dwg":
+        return _summarize_dwg_file(full)
+
     if ext in ("txt", "md", "csv", "json", "log", "py", "html", "htm", "xml"):
         return _read_plain_text(full)
 
@@ -327,6 +335,89 @@ def _try_pptx_text(full: Path) -> str:
         return t or "（幻灯片中未解析到文本）"
     except Exception as e:
         return f"（pptx 读取失败: {e}）"
+
+
+def _summarize_dwg_file(full: Path) -> str:
+    try:
+        size = full.stat().st_size
+    except OSError:
+        size = 0
+    return (
+        f"（检测到 DWG 文件，约 {size // 1024} KB。当前版本支持上传与基础识别，"
+        "尚未内置 DWG 深度结构解析；建议另存为 DXF 后可获得图层/实体摘要。）"
+    )
+
+
+def _try_dxf_summary(full: Path) -> str:
+    try:
+        raw = full.read_bytes()[: min(MAX_TEXT_FILE_READ * 8, 2_000_000)]
+    except OSError as e:
+        return f"（DXF 读取失败: {e}）"
+    text = ""
+    for enc in ("utf-8", "utf-8-sig", "gbk", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            text = ""
+    if not text:
+        text = raw.decode("utf-8", errors="replace")
+    lines = [ln.rstrip("\r") for ln in text.splitlines() if ln is not None]
+    if len(lines) < 4:
+        return "（DXF 内容过短，未能提取有效摘要）"
+    pairs: list[tuple[str, str]] = []
+    i = 0
+    while i + 1 < len(lines):
+        pairs.append((lines[i].strip(), lines[i + 1].strip()))
+        i += 2
+    if not pairs:
+        return "（DXF 未解析到有效 group code）"
+
+    layers: set[str] = set()
+    entity_counts: dict[str, int] = {}
+    in_tables = False
+    in_entities = False
+    j = 0
+    while j < len(pairs):
+        tag, val = pairs[j]
+        if tag == "0" and val == "SECTION":
+            sec_name = ""
+            if j + 1 < len(pairs) and pairs[j + 1][0] == "2":
+                sec_name = pairs[j + 1][1].upper()
+            in_tables = sec_name == "TABLES"
+            in_entities = sec_name == "ENTITIES"
+            j += 1
+            continue
+        if tag == "0" and val == "ENDSEC":
+            in_tables = False
+            in_entities = False
+            j += 1
+            continue
+        if in_tables and tag == "0" and val == "LAYER":
+            k = j + 1
+            while k < len(pairs):
+                t2, v2 = pairs[k]
+                if t2 == "0":
+                    break
+                if t2 == "2" and v2:
+                    layers.add(v2)
+                    break
+                k += 1
+        if in_entities and tag == "0":
+            if val and val not in {"SEQEND", "ENDSEC"}:
+                entity_counts[val] = entity_counts.get(val, 0) + 1
+        j += 1
+
+    top_entities = sorted(entity_counts.items(), key=lambda x: (-x[1], x[0]))[:8]
+    top_entity_text = ", ".join([f"{name}:{count}" for name, count in top_entities]) if top_entities else "无"
+    layer_preview = ", ".join(sorted(layers)[:12]) if layers else "无"
+    return (
+        "DXF 摘要：\n"
+        f"- 图层数：{len(layers)}\n"
+        f"- 实体总数：{sum(entity_counts.values())}\n"
+        f"- 实体类型 Top：{top_entity_text}\n"
+        f"- 图层示例：{layer_preview}"
+    )
 
 
 def merge_json_attachments(

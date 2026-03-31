@@ -1,4 +1,3 @@
-from config import MODEL_POOL
 import base64
 import ipaddress
 import json
@@ -20,19 +19,16 @@ from urllib.parse import parse_qs, quote, quote_plus, unquote_plus, urlparse
 
 import requests
 
-from automation import browser_driver
-from automation import desktop_uia
-from automation import interaction_intelligence
-from automation import wechat_driver
-from automation import screen_ocr
+from automation import browser_driver, desktop_uia, interaction_intelligence, screen_ocr, wechat_driver
 from automation.app_profiles import wechat_heuristics
 from automation.app_profiles.action_merge import (
     normalize_actions_with_merge_rules,
     wechat_heuristic_enabled,
 )
 from automation.app_profiles.prompt_fragments import load_planner_fragment
+from config import MODEL_POOL
 from llm.volcengine_llm import VolcengineLLM, _normalize_reasoning_effort
-from memory.memory_system import ShortTermMemory, MidTermMemory, LongTermMemory
+from memory.memory_system import LongTermMemory, MidTermMemory, ShortTermMemory
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +55,7 @@ def format_wechat_need_disambiguation_message(candidates: list[str] | None) -> s
     """
     cs = [str(c) for c in (candidates or []) if str(c).strip()]
     if cs:
-        lines = "\n".join([f"{i+1}) {c}" for i, c in enumerate(cs[:6])])
+        lines = "\n".join([f"{i + 1}) {c}" for i, c in enumerate(cs[:6])])
         return f"需要消歧：找到多个匹配对象，请回复你要发送的选项序号（或直接回复完整名称/备注）。\n{lines}"
     return "需要消歧：找到多个匹配对象，请补充接收人显示名/备注名/微信号等以便定位。"
 
@@ -231,11 +227,11 @@ def _windows_resolve_app_executable(app: str) -> tuple[Path | None, dict]:
         "ps": "https://www.adobe.com",
         "adobe": "https://www.adobe.com",
     }
-    
+
     raw = (app or "").strip().strip('"').strip("'")
     if not raw:
         return None, {"found": False, "web_alternative": None}
-    
+
     # 查找网页版替代方案
     web_alt = None
     raw_lower = raw.lower()
@@ -243,7 +239,7 @@ def _windows_resolve_app_executable(app: str) -> tuple[Path | None, dict]:
         if key in raw_lower or raw_lower in key:
             web_alt = url
             break
-    
+
     trial = Path(raw)
     if trial.is_file():
         return trial, {"found": True, "web_alternative": web_alt}
@@ -427,6 +423,79 @@ class ARIAManager:
             "media_summarize",
         }
     )
+    TOOL_PROFILES = {
+        "local_execute": frozenset(
+            {
+                "conversation_new",
+                "shell_run",
+                "file_write",
+                "file_move",
+                "file_delete",
+                "browser_open",
+                "browser_click",
+                "browser_type",
+                "browser_find",
+                "browser_hover",
+                "browser_select",
+                "browser_upload",
+                "browser_scroll",
+                "browser_wait",
+                "browser_js",
+                "browser_press",
+                "desktop_open_app",
+                "desktop_hotkey",
+                "desktop_type",
+                "desktop_sequence",
+                "wechat_send_message",
+                "wechat_open_chat",
+                "wechat_check_login",
+                "screen_ocr",
+                "screen_find_text",
+                "screen_click_text",
+                "media_summarize",
+            }
+        ),
+        "web_information": frozenset(
+            {
+                "browser_open",
+                "browser_click",
+                "browser_type",
+                "browser_find",
+                "browser_hover",
+                "browser_select",
+                "browser_upload",
+                "browser_scroll",
+                "browser_wait",
+                "browser_js",
+                "browser_press",
+                "web_fetch",
+                "web_understand",
+                "media_summarize",
+            }
+        ),
+        "qa_only": frozenset(),
+        "mixed": frozenset(ALLOWED_ACTION_TYPES),
+    }
+    WORKSPACE_MODE_PROFILES = {
+        "aria": frozenset(ALLOWED_ACTION_TYPES),
+        "aria_engineer_autocad": frozenset(
+            {
+                "conversation_new",
+                "file_write",
+                "file_move",
+                "browser_open",
+                "browser_find",
+                "browser_wait",
+                "desktop_open_app",
+                "screen_ocr",
+                "screen_find_text",
+                "screen_click_text",
+                "web_fetch",
+                "web_understand",
+                "media_summarize",
+            }
+        ),
+    }
 
     def __init__(self, api_key: Optional[str] = None):
         self.model_pool = MODEL_POOL
@@ -444,32 +513,118 @@ class ARIAManager:
         self.llm = VolcengineLLM(self.api_key) if self.api_key else VolcengineLLM(None)
         env_model = (os.getenv("MODEL_NAME") or "").strip()
         pool_model = str(self.model_pool.get("llm") or "").strip()
-        self.unified_model = env_model or pool_model or str(getattr(self.llm, "model_name", "") or "").strip() or "doubao-seed-2-0-lite-260215"
+        self.unified_model = (
+            env_model
+            or pool_model
+            or str(getattr(self.llm, "model_name", "") or "").strip()
+            or "doubao-seed-2-0-lite-260215"
+        )
         self.interaction_core = interaction_intelligence.InteractionIntelligenceCore()
-        
+
         # 初始化三级记忆
         self.stm = ShortTermMemory()  # 短期记忆
         self.mtm = MidTermMemory()  # 中期记忆
         self.ltm = LongTermMemory()  # 长期记忆
-        
+
         # 加载记忆
         self.mtm.load()
         self.ltm.load()
         self.exec_agent_name_pool: dict[str, list[str]] = {
             "TextExecAgent": [
-                "李楠", "张弛", "王越", "赵晨", "陈屿", "周航", "吴泽", "郑川", "冯煦", "孙启",
-                "马岩", "朱睿", "胡峻", "郭湛", "何川", "高远", "林朔", "罗尧", "梁恺", "谢恒",
-                "宋川", "唐逸", "许诺", "韩骁", "曹峥", "彭锐", "袁景", "邓一鸣", "蒋澈", "沈奕",
+                "李楠",
+                "张弛",
+                "王越",
+                "赵晨",
+                "陈屿",
+                "周航",
+                "吴泽",
+                "郑川",
+                "冯煦",
+                "孙启",
+                "马岩",
+                "朱睿",
+                "胡峻",
+                "郭湛",
+                "何川",
+                "高远",
+                "林朔",
+                "罗尧",
+                "梁恺",
+                "谢恒",
+                "宋川",
+                "唐逸",
+                "许诺",
+                "韩骁",
+                "曹峥",
+                "彭锐",
+                "袁景",
+                "邓一鸣",
+                "蒋澈",
+                "沈奕",
             ],
             "VisionExecAgent": [
-                "周岚", "顾宁", "程澄", "苏芮", "夏沫", "叶青", "白露", "安禾", "姜苒", "陆悠",
-                "沈禾", "温雅", "林汐", "贺晴", "乔然", "宋颜", "唐婧", "许薇", "袁念", "邱彤",
-                "施瑶", "徐静", "韩悦", "罗妍", "蔡宁", "孔乔", "杜曼", "陶冉", "毛伊", "尹澜",
+                "周岚",
+                "顾宁",
+                "程澄",
+                "苏芮",
+                "夏沫",
+                "叶青",
+                "白露",
+                "安禾",
+                "姜苒",
+                "陆悠",
+                "沈禾",
+                "温雅",
+                "林汐",
+                "贺晴",
+                "乔然",
+                "宋颜",
+                "唐婧",
+                "许薇",
+                "袁念",
+                "邱彤",
+                "施瑶",
+                "徐静",
+                "韩悦",
+                "罗妍",
+                "蔡宁",
+                "孔乔",
+                "杜曼",
+                "陶冉",
+                "毛伊",
+                "尹澜",
             ],
             "SpeechExecAgent": [
-                "赵尧", "林嘉", "方恺", "魏哲", "潘越", "吕衡", "严朗", "任川", "施博", "钟宁",
-                "董恺", "孟川", "祁峰", "易然", "池恒", "裴青", "邢岳", "鲍骁", "洪毅", "汪言",
-                "贾睿", "范哲", "樊涛", "邹赫", "石航", "雷靖", "龙湛", "万川", "段驰", "侯野",
+                "赵尧",
+                "林嘉",
+                "方恺",
+                "魏哲",
+                "潘越",
+                "吕衡",
+                "严朗",
+                "任川",
+                "施博",
+                "钟宁",
+                "董恺",
+                "孟川",
+                "祁峰",
+                "易然",
+                "池恒",
+                "裴青",
+                "邢岳",
+                "鲍骁",
+                "洪毅",
+                "汪言",
+                "贾睿",
+                "范哲",
+                "樊涛",
+                "邹赫",
+                "石航",
+                "雷靖",
+                "龙湛",
+                "万川",
+                "段驰",
+                "侯野",
             ],
         }
         self.action_registry = {
@@ -510,6 +665,10 @@ class ARIAManager:
         self.execution_lock = threading.Lock()
         self.allowed_work_root = Path(os.path.abspath("."))
         self.max_action_steps = 30
+        try:
+            self.max_react_iterations = max(1, min(60, int(os.getenv("ARIA_REACT_MAX_STEPS", "20"))))
+        except (TypeError, ValueError):
+            self.max_react_iterations = 20
         self.default_step_timeout_s = 90
         self._ab_context_by_task: dict[str, dict[str, Any]] = {}
         self.last_model_trace: dict[str, Any] = {}
@@ -524,6 +683,7 @@ class ARIAManager:
         self._token_usage_tls = threading.local()
         self._turn_vision_data_urls: list[str] = []
         self._turn_reasoning_effort: str | None = None
+        self.workspace_mode = self._normalize_workspace_mode(os.getenv("ARIA_DEFAULT_WORKSPACE_MODE") or "aria")
 
     def _default_reasoning_effort_from_env(self) -> str:
         raw = (os.getenv("REASONING_EFFORT_DEFAULT") or "medium").strip().lower()
@@ -577,7 +737,10 @@ class ARIAManager:
         docish = exts & {"png", "jpg", "jpeg", "gif", "webp", "pdf", "docx", "xlsx", "xlsm", "pptx"}
         if has_attachments or docish:
             return "medium"
-        if any(k in text for k in ("步骤", "计划", "实现", "编写", "部署", "调试", "多个", "首先", "然后", "拆分", "子任务")):
+        if any(
+            k in text
+            for k in ("步骤", "计划", "实现", "编写", "部署", "调试", "多个", "首先", "然后", "拆分", "子任务")
+        ):
             return "medium"
         if len(text) > 800 or len(dc) > 1500:
             return "medium"
@@ -608,7 +771,7 @@ class ARIAManager:
                     "你是ARIA推理强度路由器。根据用户本轮任务复杂度，从 minimal、low、medium、high 中选一。"
                     "minimal：寒暄、极短确认、无实质任务；low：单轮简单问答；medium：含附件、多步、实现类；"
                     "high：明确要求深度推导/复杂方案或输入很长。"
-                    "只输出JSON：{\"reasoning_effort\":\"minimal|low|medium|high\",\"reason\":\"...\"}"
+                    '只输出JSON：{"reasoning_effort":"minimal|low|medium|high","reason":"..."}'
                 ),
             },
             {
@@ -707,10 +870,28 @@ class ARIAManager:
         self.llm = VolcengineLLM(api_key if api_key else None)
         env_model = (os.getenv("MODEL_NAME") or "").strip()
         pool_model = str(self.model_pool.get("llm") or "").strip()
-        self.unified_model = env_model or pool_model or str(getattr(self.llm, "model_name", "") or "").strip() or "doubao-seed-2-0-lite-260215"
+        self.unified_model = (
+            env_model
+            or pool_model
+            or str(getattr(self.llm, "model_name", "") or "").strip()
+            or "doubao-seed-2-0-lite-260215"
+        )
 
     def set_conversation_context(self, conversation_id: str) -> None:
         self.current_conversation_id = conversation_id or ""
+
+    def _normalize_workspace_mode(self, mode: str | None) -> str:
+        raw = str(mode or "").strip().lower().replace("-", "_")
+        if raw in self.WORKSPACE_MODE_PROFILES:
+            return raw
+        if raw in ("aria_engineer", "engineer", "autocad"):
+            return "aria_engineer_autocad"
+        return "aria"
+
+    def set_workspace_mode(self, mode: str | None) -> str:
+        normalized = self._normalize_workspace_mode(mode)
+        self.workspace_mode = normalized
+        return normalized
 
     def set_event_sink(self, sink) -> None:
         """注册事件回调，供 SSE 推送。"""
@@ -720,10 +901,7 @@ class ARIAManager:
     def record_model_thought(self, agent_name, thought):
         if agent_name not in self.model_thoughts:
             self.model_thoughts[agent_name] = []
-        self.model_thoughts[agent_name].append({
-            "thought": thought,
-            "timestamp": time.time()
-        })
+        self.model_thoughts[agent_name].append({"thought": thought, "timestamp": time.time()})
 
     # 获取模型思考过程
     def get_model_thoughts(self, agent_name):
@@ -1028,7 +1206,11 @@ class ARIAManager:
         steps = method.get("solve_steps") or method.get("steps") or []
         if isinstance(steps, str):
             steps = [s.strip() for s in re.split(r"[\n;；]+", steps) if s.strip()]
-        lines = ["【方法论上下文 — 请与下列子步骤对齐，勿偏离总目标】", f"场景(scene)：{scene or '（未命名）'}", "步骤纲要(solve_steps)："]
+        lines = [
+            "【方法论上下文 — 请与下列子步骤对齐，勿偏离总目标】",
+            f"场景(scene)：{scene or '（未命名）'}",
+            "步骤纲要(solve_steps)：",
+        ]
         for i, s in enumerate(steps, 1):
             lines.append(f"  {i}. {s}")
         return "\n".join(lines)
@@ -1120,7 +1302,7 @@ class ARIAManager:
         判定是否应沉淀方法论。
         返回 (should_save, reason, source)。
         source: llm / heuristic
-        
+
         三道闸门：
         1. 复杂度太低（complexity_score <= 2）不保存
         2. 强时效性（temporal_risk = high）不保存
@@ -1130,24 +1312,26 @@ class ARIAManager:
         complexity = int(task_info.get("complexity_score", 3))
         if complexity <= 2:
             return False, "complexity_too_low", "heuristic"
-        
+
         # 闸门 1：强时效性
         temporal = str(task_info.get("temporal_risk", "low")).strip().lower()
         if temporal == "high":
             return False, "temporal_risk_high", "heuristic"
-        
+
         # 闸门 2：time_bound 类型
         outcome = str(task_info.get("outcome_type", "stable")).strip().lower()
         if outcome == "time_bound":
             return False, "outcome_time_bound", "heuristic"
-        
+
         user_input = str(task_info.get("user_input", "") or "").strip()
         if not user_input:
             return False, "empty_input", "heuristic"
 
         # 1) 优先走 LLM 判定（更灵活，避免硬编码）
         method_scene = str((method or {}).get("scene") or (method or {}).get("scenario") or "").strip()
-        method_keywords = self._normalize_keywords((method or {}).get("keywords") or (method or {}).get("core_keywords"))
+        method_keywords = self._normalize_keywords(
+            (method or {}).get("keywords") or (method or {}).get("core_keywords")
+        )
         step_count = len((method or {}).get("solve_steps") or (method or {}).get("steps") or [])
         is_success = bool(result_payload.get("is_success")) if isinstance(result_payload, dict) else False
 
@@ -1156,7 +1340,7 @@ class ARIAManager:
                 "role": "system",
                 "content": (
                     "你是ARIA知识沉淀判定器。目标：判断这次对话是否值得沉淀为可复用方法论。"
-                    "请只输出JSON：{\"should_save\":true/false,\"reason\":\"...\"}。"
+                    '请只输出JSON：{"should_save":true/false,"reason":"..."}。'
                     "规则：寒暄/问候/纯礼貌/无明确任务目标 -> false；"
                     "有清晰任务目标、可复用步骤或可迁移经验 -> true。"
                     "若 temporal_risk 为 high（天气/股价等强时效），且用户仅要一次性当下事实、方法论又无「如何查权威源/参数槽位」等可迁移流程，应 should_save:false，避免把过期答案写进知识库。"
@@ -1197,21 +1381,23 @@ class ARIAManager:
         if not text and not self._turn_vision_data_urls:
             return {"mode": "small_talk", "reason": "empty_input", "source": "heuristic", "confidence": 1.0}
 
-        user_line = f"用户输入：{text}" if text else "用户输入：（本消息主要为图片附件，无额外文字；请根据画面判断是闲聊问候类还是任务类。）"
+        user_line = (
+            f"用户输入：{text}"
+            if text
+            else "用户输入：（本消息主要为图片附件，无额外文字；请根据画面判断是闲聊问候类还是任务类。）"
+        )
         messages = [
             {
                 "role": "system",
                 "content": (
                     "你是ARIA输入路由器。判断用户输入应该走哪条链路："
                     "small_talk(寒暄/问候/感谢/闲聊) 或 task(有明确目标的任务请求)。"
-                    "仅输出JSON：{\"mode\":\"small_talk|task\",\"reason\":\"...\",\"confidence\":0-1}。"
+                    '仅输出JSON：{"mode":"small_talk|task","reason":"...","confidence":0-1}。'
                 ),
             },
             {"role": "user", "content": self._user_content_with_optional_vision(user_line)},
         ]
-        llm_text = self._call_llm(
-            messages, fallback_text="", agent_code="TaskParser", reasoning_effort="minimal"
-        )
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="TaskParser", reasoning_effort="minimal")
         data = self._extract_json_object(llm_text)
         if data:
             mode = str(data.get("mode", "")).strip().lower()
@@ -1391,9 +1577,7 @@ class ARIAManager:
             return tt
         return lines[-1]
 
-    def _wechat_planning_intent_and_source(
-        self, turn_text: str, dialogue_context: str
-    ) -> tuple[bool, str, str]:
+    def _wechat_planning_intent_and_source(self, turn_text: str, dialogue_context: str) -> tuple[bool, str, str]:
         """是否走微信链路、用于启发式/抽槽的源文本、仅 User 拼成的上下文（供 strip/override 辅助判定）。"""
         wx_scope = self._user_utterances_for_wechat_planning(dialogue_context, turn_text)
         intent_turn = wechat_heuristics.wechat_send_or_open_intent(turn_text)
@@ -1653,7 +1837,9 @@ class ARIAManager:
         t = (text or "").strip()
         if not t:
             return False
-        if not any(k in t for k in ("天气", "气温", "下雨", "降温", "升温", "台风", "雾霾", "空气质量", "冷不冷", "热不热")):
+        if not any(
+            k in t for k in ("天气", "气温", "下雨", "降温", "升温", "台风", "雾霾", "空气质量", "冷不冷", "热不热")
+        ):
             return False
         if any(
             k in t
@@ -1752,6 +1938,83 @@ class ARIAManager:
         """按 automation/app_profiles/merge_rules.yaml 合并相邻重复链（如 open + send）。"""
         return normalize_actions_with_merge_rules(actions, self._normalize_action_type_alias)
 
+    def _allowed_action_types_for_task_form(self, task_form: str) -> frozenset[str]:
+        tf = (task_form or "").strip().lower()
+        return self.TOOL_PROFILES.get(tf, self.TOOL_PROFILES["mixed"])
+
+    def _allowed_action_types_for_workspace_mode(self, workspace_mode: str | None) -> frozenset[str]:
+        mode = self._normalize_workspace_mode(workspace_mode or self.workspace_mode)
+        return self.WORKSPACE_MODE_PROFILES.get(mode, self.WORKSPACE_MODE_PROFILES["aria"])
+
+    def _apply_task_form_tool_allowlist(self, plan: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(plan, dict):
+            return {"mode": "qa", "summary": "invalid_plan", "actions": []}
+        actions = plan.get("actions")
+        if not isinstance(actions, list) or not actions:
+            return plan
+        task_form = str(plan.get("task_form") or "mixed").strip().lower()
+        workspace_mode = self._normalize_workspace_mode(plan.get("workspace_mode") or self.workspace_mode)
+        task_allowed = self._allowed_action_types_for_task_form(task_form)
+        mode_allowed = self._allowed_action_types_for_workspace_mode(workspace_mode)
+        allowed = task_allowed & mode_allowed
+        filtered: list[dict[str, Any]] = []
+        dropped_by_task_form: list[str] = []
+        dropped_by_workspace_mode: list[str] = []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            normalized_type = self._normalize_action_type_alias(str(action.get("type") or ""))
+            if normalized_type in allowed:
+                if normalized_type != str(action.get("type") or ""):
+                    action = dict(action)
+                    action["type"] = normalized_type
+                filtered.append(action)
+            else:
+                if normalized_type not in task_allowed:
+                    dropped_by_task_form.append(normalized_type or "unknown")
+                elif normalized_type not in mode_allowed:
+                    dropped_by_workspace_mode.append(normalized_type or "unknown")
+                else:
+                    dropped_by_task_form.append(normalized_type or "unknown")
+        if dropped_by_task_form or dropped_by_workspace_mode:
+            plan["actions"] = filtered
+            plan["workspace_mode"] = workspace_mode
+            plan["requires_double_confirmation"] = self.requires_double_confirmation(filtered)
+            if dropped_by_task_form:
+                self.push_event(
+                    "tool_allowlist",
+                    "warning",
+                    "TaskParser",
+                    "已按 task_form 收敛可用动作集合",
+                    {"task_form": task_form, "dropped_actions": dropped_by_task_form, "kept_count": len(filtered)},
+                )
+            if dropped_by_workspace_mode:
+                self.push_event(
+                    "workspace_mode_allowlist",
+                    "warning",
+                    "TaskParser",
+                    "已按 workspace_mode 收敛可用动作集合",
+                    {
+                        "workspace_mode": workspace_mode,
+                        "dropped_actions": dropped_by_workspace_mode,
+                        "kept_count": len(filtered),
+                    },
+                )
+            dropped_count = len(dropped_by_task_form) + len(dropped_by_workspace_mode)
+            self.push_log("TaskParser", f"工具白名单过滤：移除 {dropped_count} 个动作", "warning")
+            if not filtered and plan.get("mode") == "action":
+                plan["mode"] = "clarify"
+                plan["summary"] = (
+                    "当前任务形态下可执行动作已被安全策略过滤。请确认是否切换为联网检索、或补充本机执行约束。"
+                )
+                plan["choices"] = [
+                    {"id": "switch_local", "label": "改为本机执行（local_execute）"},
+                    {"id": "switch_web", "label": "改为联网检索（web_information）"},
+                ]
+        else:
+            plan["workspace_mode"] = workspace_mode
+        return plan
+
     def plan_actions(self, user_input: str, dialogue_context: str = "") -> dict[str, Any]:
         text = (user_input or "").strip()
         if not text:
@@ -1797,18 +2060,18 @@ class ARIAManager:
                     "仅当用户字面出现检索/网页意图或 task_form=web_information 时才输出 web_understand/web_fetch；"
                     "模棱两可时优先 local_execute，可配合 clarify 追问，不要默认联网搜索。\n\n"
                     "clarify 时可选附带 choices 数组（最多6条）："
-                    "\"choices\":[{\"id\":\"a\",\"label\":\"选项文案\"},...]，供用户点击，不必打字。"
+                    '"choices":[{"id":"a","label":"选项文案"},...]，供用户点击，不必打字。'
                     "禁止编造执行结果。"
                     "仅输出JSON："
-                    "{\"mode\":\"small_talk|qa|action|clarify\","
-                    "\"summary\":\"...\","
-                    "\"task_form\":\"local_execute|web_information|qa_only|mixed\","
-                    "\"complexity_score\":1,"
-                    "\"complexity_reason\":\"一句话说明评分理由\","
-                    "\"temporal_risk\":\"high\","
-                    "\"outcome_type\":\"time_bound\","
-                    "\"choices\":[],"
-                    "\"actions\":[{\"type\":\"...\",\"target\":\"...\",\"filters\":{},\"params\":{},\"risk\":\"low|medium|high\",\"reason\":\"...\"}]}"
+                    '{"mode":"small_talk|qa|action|clarify",'
+                    '"summary":"...",'
+                    '"task_form":"local_execute|web_information|qa_only|mixed",'
+                    '"complexity_score":1,'
+                    '"complexity_reason":"一句话说明评分理由",'
+                    '"temporal_risk":"high",'
+                    '"outcome_type":"time_bound",'
+                    '"choices":[],'
+                    '"actions":[{"type":"...","target":"...","filters":{},"params":{},"risk":"low|medium|high","reason":"..."}]}'
                     "可用动作类型示例：kb_delete_all,kb_delete_by_keyword,kb_delete_low_quality,conversation_new,shell_run,file_write,file_move,file_delete,browser_open,browser_click,browser_type,browser_find,browser_hover,browser_select,browser_upload,browser_scroll,browser_wait,browser_js,browser_press,media_summarize,desktop_open_app,desktop_hotkey,desktop_type,desktop_sequence,wechat_send_message,wechat_open_chat,wechat_check_login,screen_ocr,screen_find_text,screen_click_text,web_fetch,web_understand。"
                     "能力边界（须严格遵守，勿向用户承诺未启用的能力）："
                     + browser_driver.capability_summary_for_planner()
@@ -1818,7 +2081,7 @@ class ARIAManager:
                     + "desktop_open_app：params.app 或顶层 target 填应用名/路径；Windows 下会扫描本机桌面（含 OneDrive 桌面）、开始菜单与微信/WPS 等常见安装路径，再启动；仍失败时让用户提供 .exe 完整路径。"
                     "本地文档/表格：能确定相对工作区的路径与内容时优先 file_write（params.path、params.content、mode overwrite|append）；格式/路径/是否覆盖不明时用 mode=clarify 追问，勿直接拒绝。"
                     "若用户已给出工作区相对路径的 .docx，且仅要求改字体/字号/加粗/斜体等样式：必须 mode=action，使用 file_write，params.path 为原文档路径，params.docx_style 为对象（font_name、font_size_pt、bold、italic）；禁止同时输出 web_understand 查教程；仅当用户明确要教程或原理时才 web_understand。"
-                    "Office 二进制（服务端生成，用户确认执行后可下载）：path 以 .docx 结尾时 params.content 为正文、可选 params.title；.xlsx 时优先 params.rows 为二维数组[[\"列1\",\"列2\"],[\"a\",\"b\"]]，否则用 content 多行、制表符或逗号分列；.pptx 时 params.title 与 params.bullets 字符串数组或 content 多行（首行可作标题）。路径建议 data/artifacts/文件名。"
+                    'Office 二进制（服务端生成，用户确认执行后可下载）：path 以 .docx 结尾时 params.content 为正文、可选 params.title；.xlsx 时优先 params.rows 为二维数组[["列1","列2"],["a","b"]]，否则用 content 多行、制表符或逗号分列；.pptx 时 params.title 与 params.bullets 字符串数组或 content 多行（首行可作标题）。路径建议 data/artifacts/文件名。'
                     "禁止因「没有 Word/Office」就声明无法完成：须列举替代（记事本、Markdown、WPS、LibreOffice、VS Code、工作区 file_write 写 .md/.txt/.csv 等）。"
                     "用户可能已通过 Web 上传文件：【本轮输入】中「抽取摘要」含 txt/md/pdf/docx/xlsx/pptx 等正文摘录及 data/artifacts/uploads/… 相对路径；图片除摘要外，在同轮多模态请求中会以 image 形式一并传入（请直接根据画面回答/规划）。可据此做总结、改写、或 file_write 写入新文件；勿声称「已保存到用户本机文档」除非实际执行了 file_write。禁止虚构未执行动作的结果。"
                     "缺软件或不会配置时：可输出 web_understand（检索安装/配置步骤，params.question 写清系统与软件名）或 clarify 让用户选已装软件；不要只给失败理由。"
@@ -1851,17 +2114,18 @@ class ARIAManager:
             {
                 "role": "user",
                 "content": self._user_content_with_optional_vision(
-                    (
+                    
                         f"【本会话近期对话】\n{(dialogue_context or '').strip()}\n\n【本轮输入】\n{text}"
                         if (dialogue_context or "").strip()
                         else text
-                    )
+                    
                 ),
             },
         ]
         llm_text = self._call_llm(messages, fallback_text="", agent_code="TaskParser")
         llm_plan = self._extract_json_object(llm_text)
         plan = self.normalize_action_plan(llm_plan) if llm_plan else {}
+        plan = self._apply_task_form_tool_allowlist(plan)
         if plan.get("mode") != "clarify":
             self._strip_contradictory_web_actions(text, plan, wx_scope=wx_scope)
         if plan.get("mode") == "clarify":
@@ -1884,18 +2148,22 @@ class ARIAManager:
             return plan
 
         lowered = text.lower()
-        if any(k in lowered for k in ["清理", "清空", "删除", "移除"]) and any(k in text for k in ["知识库", "方法论", "经验"]):
+        if any(k in lowered for k in ["清理", "清空", "删除", "移除"]) and any(
+            k in text for k in ["知识库", "方法论", "经验"]
+        ):
             action_type = "kb_delete_low_quality"
             if "清空" in text:
                 action_type = "kb_delete_all"
-            actions = [{
-                "type": action_type,
-                "target": "knowledge_base",
-                "filters": {},
-                "params": {},
-                "risk": self.derive_action_risk(action_type, "medium"),
-                "reason": "用户请求清理知识库",
-            }]
+            actions = [
+                {
+                    "type": action_type,
+                    "target": "knowledge_base",
+                    "filters": {},
+                    "params": {},
+                    "risk": self.derive_action_risk(action_type, "medium"),
+                    "reason": "用户请求清理知识库",
+                }
+            ]
             plan_kb = {
                 "mode": "action",
                 "summary": "识别为知识库清理操作",
@@ -1905,19 +2173,23 @@ class ARIAManager:
             }
             self._mend_browser_open_actions(text, plan_kb)
             return plan_kb
-        if any(k in lowered for k in ["执行命令", "运行命令", "run command", "terminal"]) and any(s in text for s in ["`", "cmd", "powershell", "python", "pip "]):
+        if any(k in lowered for k in ["执行命令", "运行命令", "run command", "terminal"]) and any(
+            s in text for s in ["`", "cmd", "powershell", "python", "pip "]
+        ):
             cmd = text
             m = re.search(r"`([^`]+)`", text)
             if m:
                 cmd = m.group(1).strip()
-            actions = [{
-                "type": "shell_run",
-                "target": "terminal",
-                "filters": {},
-                "params": {"command": cmd, "cwd": "."},
-                "risk": self.derive_action_risk("shell_run", "medium"),
-                "reason": "用户请求执行终端命令",
-            }]
+            actions = [
+                {
+                    "type": "shell_run",
+                    "target": "terminal",
+                    "filters": {},
+                    "params": {"command": cmd, "cwd": "."},
+                    "risk": self.derive_action_risk("shell_run", "medium"),
+                    "reason": "用户请求执行终端命令",
+                }
+            ]
             plan_sh = {
                 "mode": "action",
                 "summary": "识别为终端命令执行",
@@ -1928,14 +2200,16 @@ class ARIAManager:
             self._mend_browser_open_actions(text, plan_sh)
             return plan_sh
         if any(k in lowered for k in ["创建文件", "写入文件", "保存到文件", "write file"]):
-            actions = [{
-                "type": "file_write",
-                "target": "filesystem",
-                "filters": {},
-                "params": {"path": "output.txt", "content": text, "mode": "overwrite"},
-                "risk": "low",
-                "reason": "用户请求写入文件",
-            }]
+            actions = [
+                {
+                    "type": "file_write",
+                    "target": "filesystem",
+                    "filters": {},
+                    "params": {"path": "output.txt", "content": text, "mode": "overwrite"},
+                    "risk": "low",
+                    "reason": "用户请求写入文件",
+                }
+            ]
             plan_fw = {
                 "mode": "action",
                 "summary": "识别为文件写入操作",
@@ -2028,9 +2302,7 @@ class ARIAManager:
             },
             {"role": "user", "content": block},
         ]
-        llm_text = self._call_llm(
-            messages, fallback_text="", agent_code="WeChatSlotParser", reasoning_effort="minimal"
-        )
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="WeChatSlotParser", reasoning_effort="minimal")
         data = self._extract_json_object(llm_text)
         if not data:
             return None
@@ -2131,11 +2403,7 @@ class ARIAManager:
             "执行完成后回复里会给出 /api/workspace_file?path=… 下载链接。"
         )
         if not s:
-            return (
-                "为继续推进，请补充更具体的需求（例如保存路径、文件格式、使用的软件名称等）。"
-                + choice_lines
-                + tail
-            )
+            return "为继续推进，请补充更具体的需求（例如保存路径、文件格式、使用的软件名称等）。" + choice_lines + tail
         return "为准确帮你完成，请先确认或补充下列信息（可直接逐条回复）：\n\n" + s + choice_lines + tail
 
     def format_action_plan_for_user(self, plan: dict[str, Any]) -> str:
@@ -2164,7 +2432,7 @@ class ARIAManager:
         - high: 需二次确认
         """
         level = "safe"
-        for a in (actions or []):
+        for a in actions or []:
             if not isinstance(a, dict):
                 continue
             action_type = self._normalize_action_type_alias(str(a.get("type") or ""))
@@ -2224,6 +2492,7 @@ class ARIAManager:
         out_path = out_dir / f"{prefix}_{ts}.png"
         try:
             from PIL import ImageGrab  # type: ignore
+
             img = ImageGrab.grab()
             img.save(str(out_path))
             return [str(out_path)]
@@ -2389,7 +2658,12 @@ class ARIAManager:
                 row["stderr"] = str(e)
                 row["error_code"] = "execution_exception"
                 row["retryable"] = True
-                row["result"] = {"success": False, "message": str(e), "error_code": "execution_exception", "retryable": True}
+                row["result"] = {
+                    "success": False,
+                    "message": str(e),
+                    "error_code": "execution_exception",
+                    "retryable": True,
+                }
             row["duration_ms"] = int((time.time() - started) * 1000)
             self.push_event(
                 "computer_action",
@@ -2441,32 +2715,33 @@ class ARIAManager:
         score = int(plan.get("complexity_score", 3))
         temporal = str(plan.get("temporal_risk", "low")).lower()
         outcome = str(plan.get("outcome_type", "stable")).lower()
-        
+
         # 确保 plan 中有 actions
         actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
         if not actions:
             return {"success": False, "message": "no_actions_to_execute", "fast_path": False}
-        
+
         if score <= 2:
             # 快路径：直接执行，不保存方法论
-            result = self.execute_actions(actions, conversation_id, request_id, methodology_manager, conversation_manager)
+            result = self.execute_actions(
+                actions, conversation_id, request_id, methodology_manager, conversation_manager
+            )
             return {**result, "fast_path": True, "methodology_saved": False, "complexity_score": score}
-        
+
         elif score <= 4:
             # 标准路径
-            result = self.execute_actions(actions, conversation_id, request_id, methodology_manager, conversation_manager)
+            result = self.execute_actions(
+                actions, conversation_id, request_id, methodology_manager, conversation_manager
+            )
             # 强时效性不保存方法论
             save_method = (temporal != "high") and (outcome != "time_bound")
             if save_method and result.get("success_count", 0) > 0:
                 # 调用 save_methodology 保存
-                task_info = {
-                    "task_id": self.current_task_id,
-                    "user_input": plan.get("summary", ""),
-                    "temporal_risk": temporal,
-                }
                 method = {
                     "scene": plan.get("summary", "")[:500],
-                    "solve_steps": [f"{i+1}. {a.get('type')}: {a.get('reason', '')[:200]}" for i, a in enumerate(actions)],
+                    "solve_steps": [
+                        f"{i + 1}. {a.get('type')}: {a.get('reason', '')[:200]}" for i, a in enumerate(actions)
+                    ],
                     "keywords": [],
                     "risk_level": self.evaluate_action_risk_level(actions),
                     "quality_metrics": {
@@ -2476,8 +2751,7 @@ class ARIAManager:
                         "unavailable_count": int(result.get("unavailable_count", 0) or 0),
                     },
                     "score": (
-                        float(result.get("success_count", 0) or 0.0)
-                        / max(1, float(result.get("total", 0) or 1.0))
+                        float(result.get("success_count", 0) or 0.0) / max(1, float(result.get("total", 0) or 1.0))
                     ),
                 }
                 try:
@@ -2486,11 +2760,13 @@ class ARIAManager:
                 except Exception as e:
                     self.push_log("MethodSaver", f"方法论保存失败：{e}", "warning")
             return {**result, "fast_path": False, "methodology_saved": save_method, "complexity_score": score}
-        
+
         else:
             # 重路径：完整流程（已有逻辑保持不变）
             # 这里调用原有的完整执行流程
-            return self.execute_full_workflow(plan, conversation_id, request_id, methodology_manager, conversation_manager)
+            return self.execute_full_workflow(
+                plan, conversation_id, request_id, methodology_manager, conversation_manager
+            )
 
     def execute_full_workflow(
         self,
@@ -2504,7 +2780,12 @@ class ARIAManager:
         # 保持原有逻辑不变，这里简单调用 execute_actions
         actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
         result = self.execute_actions(actions, conversation_id, request_id, methodology_manager, conversation_manager)
-        return {**result, "fast_path": False, "full_workflow": True, "complexity_score": plan.get("complexity_score", 5)}
+        return {
+            **result,
+            "fast_path": False,
+            "full_workflow": True,
+            "complexity_score": plan.get("complexity_score", 5),
+        }
 
     def create_execution_session(
         self,
@@ -2522,6 +2803,7 @@ class ARIAManager:
         with self.execution_lock:
             self.execution_sessions[session_id] = {
                 "session_id": session_id,
+                "session_kind": "batch",
                 "conversation_id": conversation_id,
                 "request_id": request_id,
                 "created_at": time.time(),
@@ -2541,6 +2823,417 @@ class ARIAManager:
             }
         return session_id
 
+    def create_react_execution_session(
+        self,
+        conversation_id: str,
+        request_id: str,
+        user_goal: str,
+        dialogue_context: str,
+        methodology_manager: Any,
+        conversation_manager: Any,
+        *,
+        action_screenshots: bool = False,
+        plan_summary: str = "",
+        plan_risk_level: str = "medium",
+    ) -> str:
+        """ReAct：异步线程内逐步 Thought→Action→Observation，与批量 execute_actions 会话并存。"""
+        session_id = str(uuid.uuid4())
+        with self.execution_lock:
+            self.execution_sessions[session_id] = {
+                "session_id": session_id,
+                "session_kind": "react",
+                "conversation_id": conversation_id,
+                "request_id": request_id,
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "status": "pending",
+                "paused": False,
+                "aborted": False,
+                "manual_takeover": False,
+                "actions": [],
+                "report": [],
+                "error": "",
+                "action_screenshots": bool(action_screenshots),
+                "plan_summary": str(plan_summary or ""),
+                "plan_risk_level": str(plan_risk_level or "medium"),
+                "_methodology_manager": methodology_manager,
+                "_conversation_manager": conversation_manager,
+                "react_goal": (user_goal or "").strip(),
+                "react_dialogue": (dialogue_context or "").strip(),
+                "react_trace": [],
+                "react_final_message": "",
+                "react_iteration_cap": int(self.max_react_iterations),
+            }
+        return session_id
+
+    def _normalize_react_action_dict(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+        if not isinstance(raw, dict):
+            return None
+        action_type = self._normalize_action_type_alias(str(raw.get("type") or "").strip())
+        if not action_type or action_type not in self.ALLOWED_ACTION_TYPES:
+            return None
+        params = raw.get("params") if isinstance(raw.get("params"), dict) else {}
+        risk = self.derive_action_risk(action_type, str(raw.get("risk") or "medium"))
+        if action_type == "shell_run":
+            cmd = str(params.get("command") or "")
+            if any(k in cmd.lower() for k in ["del ", "rm ", "shutdown", "format ", "reg delete"]):
+                risk = "high"
+        return {
+            "type": action_type,
+            "target": str(raw.get("target") or "").strip(),
+            "filters": raw.get("filters") if isinstance(raw.get("filters"), dict) else {},
+            "params": params,
+            "risk": risk,
+            "reason": str(raw.get("reason") or "").strip(),
+        }
+
+    def _react_capability_prompt_fragment(self) -> str:
+        return (
+            browser_driver.capability_summary_for_planner()
+            + desktop_uia.capability_summary_for_planner()
+            + wechat_driver.get_capability_summary()
+            + screen_ocr.get_capability_summary()
+        )
+
+    def _react_format_trace_for_prompt(self, trace: list[dict[str, Any]], max_obs_chars: int = 3500) -> str:
+        if not trace:
+            return "（尚无先前步骤）"
+        lines: list[str] = []
+        for row in trace:
+            it = int(row.get("iteration") or 0)
+            th = str(row.get("thought") or "").strip()
+            act = row.get("action")
+            obs = str(row.get("observation") or "").strip()
+            if len(obs) > max_obs_chars:
+                obs = obs[: max_obs_chars - 80] + "\n…[观测已截断]"
+            lines.append(f"--- 第 {it} 步 ---\nThought: {th}")
+            if isinstance(act, dict) and act.get("type"):
+                lines.append(
+                    f"Action: type={act.get('type')} target={act.get('target')} reason={act.get('reason', '')[:200]}"
+                )
+            else:
+                lines.append("Action: （无有效动作）")
+            lines.append(f"Observation: {obs}\n")
+        return "\n".join(lines)
+
+    def _react_observation_from_row(self, row: dict[str, Any]) -> str:
+        if not isinstance(row, dict):
+            return "（无执行结果）"
+        st = str(row.get("status") or "")
+        act = str(row.get("action") or "")
+        out = str(row.get("stdout") or "").strip()
+        err = str(row.get("stderr") or "").strip()
+        ec = str(row.get("error_code") or "").strip()
+        ver = row.get("verification") if isinstance(row.get("verification"), dict) else {}
+        vok = ver.get("ok")
+        parts = [f"status={st}", f"action={act}"]
+        if ec:
+            parts.append(f"error_code={ec}")
+        if out:
+            parts.append(f"stdout={out[:6000]}")
+        if err:
+            parts.append(f"stderr={err[:2000]}")
+        if vok is not None:
+            parts.append(f"verification_ok={vok}")
+        return "\n".join(parts)
+
+    def react_infer_next_step(
+        self,
+        user_goal: str,
+        dialogue_context: str,
+        trace: list[dict[str, Any]],
+        iteration: int,
+    ) -> dict[str, Any]:
+        """单轮 ReAct：返回 thought、finish、final_message、action（可选）。"""
+        current_time_str = time.strftime("%Y年%m月%d日 %H:%M，%A")
+        trace_block = self._react_format_trace_for_prompt(trace)
+        sys_content = (
+            f"【当前时间】{current_time_str}\n\n"
+            "你是 ARIA 的 ReAct 执行器：在每一步先推理（Thought），再决定是否调用**一个**自动化动作，或结束任务。\n"
+            "你必须只输出一个 JSON 对象，禁止 markdown 代码围栏、禁止前后缀说明文字。\n\n"
+            "JSON 字段：\n"
+            '- "thought": 字符串，本步推理（下一步要做什么、为什么）。\n'
+            '- "finish": 布尔。若为 true，表示任务已在对话内完成或无需再执行动作。\n'
+            '- "final_message": 字符串。当 finish=true 时填写给用户的最终说明（可总结已完成步骤）。\n'
+            '- "action": 对象或 null。当 finish=false 且需要执行环境动作时，输出**恰好一个**动作；若仅需继续思考下一步则仍应给出 action 或置 finish=true。\n'
+            "action 对象字段：type, target, filters(对象), params(对象), risk(low|medium|high), reason。\n\n"
+            "规则：\n"
+            "- 若上一步 Observation 显示失败，应在 thought 中分析原因并调整策略（换动作、换参数或结束并说明）。\n"
+            "- 不要编造未执行的结果。\n"
+            "- 单次只输出一个 action；不要输出多个动作。\n"
+            "- 能力边界须遵守：\n"
+            + self._react_capability_prompt_fragment()
+            + "\n可用 type 列表："
+            + ", ".join(sorted(self.ALLOWED_ACTION_TYPES))
+            + "。\n"
+        )
+        user_block = (
+            f"【用户总目标】\n{user_goal.strip()}\n\n"
+            f"【会话上下文摘录】\n{(dialogue_context or '').strip() or '（无）'}\n\n"
+            f"【已完成 ReAct 轨迹】\n{trace_block}\n\n"
+            f"当前迭代序号：{iteration}。请输出下一步 JSON。"
+        )
+        messages = [
+            {"role": "system", "content": sys_content},
+            {"role": "user", "content": self._user_content_with_optional_vision(user_block)},
+        ]
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="ReActAgent")
+        data = self._extract_json_object(llm_text)
+        if not isinstance(data, dict):
+            return {
+                "thought": "（解析 JSON 失败）",
+                "finish": True,
+                "final_message": "ReAct 规划器未返回有效 JSON，请重试或改用普通执行模式。",
+                "action": None,
+            }
+        thought = str(data.get("thought") or "").strip()
+        finish = data.get("finish") is True or str(data.get("finish")).lower() in ("1", "true", "yes")
+        final_message = str(data.get("final_message") or "").strip()
+        raw_action = data.get("action")
+        action: dict[str, Any] | None = None
+        if isinstance(raw_action, dict) and raw_action.get("type"):
+            action = raw_action
+        if finish:
+            return {"thought": thought, "finish": True, "final_message": final_message or thought, "action": None}
+        if not action:
+            return {
+                "thought": thought or "（未给出动作）",
+                "finish": True,
+                "final_message": final_message or "模型未提供有效 action 且未标记 finish，已停止 ReAct 循环。",
+                "action": None,
+            }
+        return {"thought": thought, "finish": False, "final_message": "", "action": action}
+
+    def _react_cooperative_wait(self, session_id: str, request_id: str) -> bool:
+        """若返回 False 表示应结束线程（abort / manual_takeover / cancel）。"""
+        while True:
+            with self.execution_lock:
+                cur = self.execution_sessions.get(session_id) or {}
+                if cur.get("aborted"):
+                    cur["status"] = "aborted"
+                    cur["updated_at"] = time.time()
+                    cur["token_usage"] = self.get_token_usage_summary()
+                    return False
+                if cur.get("manual_takeover"):
+                    cur["status"] = "manual_takeover"
+                    cur["updated_at"] = time.time()
+                    cur["token_usage"] = self.get_token_usage_summary()
+                    return False
+                is_paused = bool(cur.get("paused"))
+            if self.is_cancelled(request_id):
+                with self.execution_lock:
+                    cur2 = self.execution_sessions.get(session_id) or {}
+                    cur2["aborted"] = True
+                    cur2["status"] = "aborted"
+                    cur2["error"] = "request_cancelled_by_user"
+                    cur2["updated_at"] = time.time()
+                    cur2["token_usage"] = self.get_token_usage_summary()
+                return False
+            if not is_paused:
+                return True
+            time.sleep(0.2)
+
+    def _run_react_execution_session(self, session_id: str) -> None:
+        self.reset_token_usage()
+        with self.execution_lock:
+            sess = self.execution_sessions.get(session_id)
+            if not sess:
+                return
+            methodology_manager = sess.get("_methodology_manager")
+            conversation_manager = sess.get("_conversation_manager")
+            conversation_id = sess.get("conversation_id") or ""
+            request_id = sess.get("request_id") or ""
+            shot_flag = bool(sess.get("action_screenshots"))
+            plan_summary = str(sess.get("plan_summary") or "")
+            plan_risk_level = str(sess.get("plan_risk_level") or "medium")
+            goal = str(sess.get("react_goal") or "")
+            dialogue = str(sess.get("react_dialogue") or "")
+            cap = int(sess.get("react_iteration_cap") or self.max_react_iterations)
+        prev_shots = bool(getattr(self, "action_screenshots_for_execution", False))
+        self.action_screenshots_for_execution = shot_flag
+        report: list[dict[str, Any]] = []
+        trace: list[dict[str, Any]] = []
+        accumulated_actions: list[dict[str, Any]] = []
+        final_msg = ""
+        try:
+            for it in range(1, cap + 1):
+                if not self._react_cooperative_wait(session_id, request_id):
+                    return
+
+                self.push_event(
+                    "react_iteration",
+                    "running",
+                    "ReActAgent",
+                    f"ReAct 第 {it}/{cap} 轮：推理与决策",
+                    {"iteration": it, "cap": cap},
+                )
+                step = self.react_infer_next_step(goal, dialogue, trace, it)
+                thought = str(step.get("thought") or "").strip()
+                self.record_model_thought("ReActAgent", f"[{it}] {thought[:2000]}")
+                self.push_event(
+                    "react_thought",
+                    "success",
+                    "ReActAgent",
+                    thought[:500] + ("…" if len(thought) > 500 else ""),
+                    {"iteration": it, "thought": thought},
+                )
+
+                if step.get("finish"):
+                    final_msg = str(step.get("final_message") or "").strip()
+                    with self.execution_lock:
+                        cur = self.execution_sessions.get(session_id)
+                        if cur:
+                            cur["react_final_message"] = final_msg
+                            cur["react_trace"] = list(trace)
+                    break
+
+                raw_action = step.get("action")
+                if not isinstance(raw_action, dict):
+                    obs = "模型未返回有效 action 对象"
+                    trace.append({"iteration": it, "thought": thought, "action": None, "observation": obs})
+                    continue
+
+                norm = self._normalize_react_action_dict(raw_action)
+                if not norm:
+                    obs = f"动作类型不在允许列表或格式无效：{raw_action.get('type')!r}"
+                    trace.append({"iteration": it, "thought": thought, "action": raw_action, "observation": obs})
+                    self.push_event("react_observation", "warning", "ReActAgent", obs, {"iteration": it})
+                    continue
+
+                self._mend_browser_open_actions(goal, {"actions": [norm]})
+                accumulated_actions.append(norm)
+                self.push_event(
+                    "react_action",
+                    "running",
+                    "ReActAgent",
+                    f"执行动作: {norm.get('type')}",
+                    {"iteration": it, "action": norm},
+                )
+
+                row_list = self.execute_actions(
+                    [norm], conversation_id, request_id, methodology_manager, conversation_manager
+                ).get("report", [])
+                row = row_list[0] if row_list else {}
+                if isinstance(row, dict):
+                    row["step_id"] = len(report) + 1
+                    report.append(row)
+                obs = self._react_observation_from_row(row) if isinstance(row, dict) else "（执行无返回）"
+                trace.append({"iteration": it, "thought": thought, "action": norm, "observation": obs})
+
+                self.push_event(
+                    "react_observation",
+                    "success" if str(row.get("status") or "") == "success" else "warning",
+                    "ReActAgent",
+                    obs[:600] + ("…" if len(obs) > 600 else ""),
+                    {"iteration": it, "status": row.get("status"), "full_observation": obs},
+                )
+
+                with self.execution_lock:
+                    cur = self.execution_sessions.get(session_id)
+                    if cur:
+                        cur["report"] = list(report)
+                        cur["actions"] = list(accumulated_actions)
+                        cur["react_trace"] = list(trace)
+                        cur["updated_at"] = time.time()
+
+                if not self._react_cooperative_wait(session_id, request_id):
+                    return
+
+            with self.execution_lock:
+                cur = self.execution_sessions.get(session_id)
+                if not cur:
+                    return
+                cur["react_trace"] = list(trace)
+                cur["react_final_message"] = final_msg
+                cur["status"] = "completed"
+                cur["updated_at"] = time.time()
+                cur["token_usage"] = self.get_token_usage_summary()
+                cur["quality_metrics"] = self._compute_execution_quality_metrics(report, risk_level=plan_risk_level)
+                cur["quality_score"] = self._score_from_quality_metrics(cur["quality_metrics"])
+            self.push_event(
+                "react_complete",
+                "success",
+                "ReActAgent",
+                f"ReAct 执行完成，共 {len(trace)} 步，动作 {len(report)} 个",
+                {"iterations": len(trace), "executed_actions": len(report)},
+            )
+
+            if report:
+                try:
+                    learn = self._auto_learn_from_execution_session(
+                        actions=accumulated_actions,
+                        report=report,
+                        summary=plan_summary or goal[:500],
+                        risk_level=plan_risk_level,
+                    )
+                    self.push_event(
+                        "method_auto_iterate",
+                        "success",
+                        "MethodSaver",
+                        "ReAct 执行后已自动更新方法论版本",
+                        {"score": learn.get("score"), "metrics": learn.get("metrics")},
+                    )
+                except Exception as e:
+                    self.push_log("MethodSaver", f"自动迭代保存失败：{e}", "warning")
+
+            body = self._format_react_chat_message(trace, report, final_msg)
+            tu = self.get_token_usage_summary()
+            logs = self.get_execution_log()
+            wfe = self.get_workflow_events()
+            if conversation_manager and conversation_id:
+                conversation_manager.append_message(
+                    conversation_id,
+                    "assistant",
+                    body,
+                    {
+                        "logs": logs,
+                        "workflow_events": wfe,
+                        "token_usage": tu,
+                        "execution_summary": True,
+                        "react_trace": trace,
+                        "react_mode": True,
+                    },
+                )
+                conversation_manager.replace_workflow_events(conversation_id, wfe)
+        finally:
+            self.action_screenshots_for_execution = prev_shots
+
+    def _format_react_chat_message(
+        self,
+        trace: list[dict[str, Any]],
+        report: list[dict[str, Any]],
+        final_message: str,
+    ) -> str:
+        parts: list[str] = ["【ReAct 执行摘要】"]
+        for row in trace:
+            it = int(row.get("iteration") or 0)
+            th = str(row.get("thought") or "").strip()
+            act = row.get("action")
+            obs = str(row.get("observation") or "").strip()
+            parts.append(f"\n--- 第 {it} 步 ---\nThought: {th[:4000]}")
+            if isinstance(act, dict) and act.get("type"):
+                parts.append(f"Action: {act.get('type')} — {act.get('reason', '')[:300]}")
+            parts.append(f"Observation:\n{obs[:8000]}")
+        if (final_message or "").strip():
+            parts.append("\n【结束说明】\n" + final_message.strip())
+        tail = self._format_execution_report_chat_text(report)
+        if tail.strip():
+            parts.append("\n\n【环境与工具输出汇总】\n" + tail)
+        return "\n".join(parts).strip()
+
+    def format_react_plan_for_user(self, plan: dict[str, Any], user_goal: str) -> str:
+        """待确认时展示 ReAct 说明（不逐条列出一次性计划中的全部动作）。"""
+        summary = str(plan.get("summary") or "").strip()
+        lines = [
+            "已启用 ReAct 模式（Reasoning + Acting）：确认后将逐步执行「Thought → Action → Observation」，"
+            "每一步根据环境反馈再决定下一步，而非一次性跑完固定动作列表。",
+        ]
+        if summary:
+            lines.append(f"\n规划摘要：{summary}")
+        lines.append(f"\n目标原文：{user_goal.strip()[:2000]}")
+        lines.append("\n请回复「确认执行」以开始 ReAct 循环（仍适用风险确认策略：高风险需二次确认）。")
+        return "\n".join(lines)
+
     def start_execution_session(self, session_id: str) -> dict[str, Any]:
         with self.execution_lock:
             sess = self.execution_sessions.get(session_id)
@@ -2550,7 +3243,9 @@ class ARIAManager:
                 return {"success": True, "status": sess["status"], "session_id": session_id}
             sess["status"] = "running"
             sess["updated_at"] = time.time()
-        t = threading.Thread(target=self._run_execution_session, args=(session_id,), daemon=True)
+            kind = str(sess.get("session_kind") or "batch")
+        target = self._run_react_execution_session if kind == "react" else self._run_execution_session
+        t = threading.Thread(target=target, args=(session_id,), daemon=True)
         t.start()
         return {"success": True, "status": "running", "session_id": session_id}
 
@@ -2582,7 +3277,9 @@ class ARIAManager:
                     pp = inp.get("params") if isinstance(inp.get("params"), dict) else {}
                     rel = str(pp.get("path") or "").strip().replace("\\", "/")
                 if st == "success":
-                    lines_fw = ["【file_write】已在 ARIA 工作区内写入文件（非「我的文档」等系统路径，除非您显式写了绝对路径）。"]
+                    lines_fw = [
+                        "【file_write】已在 ARIA 工作区内写入文件（非「我的文档」等系统路径，除非您显式写了绝对路径）。"
+                    ]
                     if out:
                         lines_fw.append(out)
                     if rel and ".." not in rel and not rel.startswith("/"):
@@ -2630,7 +3327,9 @@ class ARIAManager:
         )
         conversation_manager.replace_workflow_events(conversation_id, wfe)
 
-    def _compute_execution_quality_metrics(self, report: list[dict[str, Any]], risk_level: str = "medium") -> dict[str, Any]:
+    def _compute_execution_quality_metrics(
+        self, report: list[dict[str, Any]], risk_level: str = "medium"
+    ) -> dict[str, Any]:
         total = len(report or [])
         success = sum(1 for r in (report or []) if str(r.get("status")) == "success")
         unavailable = sum(
@@ -2639,7 +3338,9 @@ class ARIAManager:
             if str((r.get("result") or {}).get("error_code") or r.get("error_code") or "") == "unavailable_capability"
         )
         retryable = sum(1 for r in (report or []) if bool(r.get("retryable")))
-        confirmations = 2 if str(risk_level or "medium") == "high" else (1 if str(risk_level or "medium") == "medium" else 0)
+        confirmations = (
+            2 if str(risk_level or "medium") == "high" else (1 if str(risk_level or "medium") == "medium" else 0)
+        )
         duration_ms = sum(int(r.get("duration_ms", 0) or 0) for r in (report or []))
         success_rate = (success / total) if total > 0 else 0.0
         return {
@@ -2660,7 +3361,9 @@ class ARIAManager:
         score = max(0.0, min(1.0, success_rate - unavailable_penalty - retry_penalty))
         return round(score, 4)
 
-    def _refine_method_steps_from_report(self, actions: list[dict[str, Any]], report: list[dict[str, Any]]) -> list[str]:
+    def _refine_method_steps_from_report(
+        self, actions: list[dict[str, Any]], report: list[dict[str, Any]]
+    ) -> list[str]:
         steps: list[str] = []
         for i, a in enumerate(actions or [], start=1):
             t = str(a.get("type") or "")
@@ -2668,8 +3371,8 @@ class ARIAManager:
             steps.append(f"{i}. {t} - {reason or '执行该步骤'}")
         failed = [r for r in (report or []) if str(r.get("status") or "") != "success"]
         if failed:
-            steps.append(f"{len(steps)+1}. 若失败，先读取 error_code / stderr，优先重试 retryable 步骤。")
-            steps.append(f"{len(steps)+1}. 若能力不可用（unavailable_capability），切换可用驱动或请求用户手动接管。")
+            steps.append(f"{len(steps) + 1}. 若失败，先读取 error_code / stderr，优先重试 retryable 步骤。")
+            steps.append(f"{len(steps) + 1}. 若能力不可用（unavailable_capability），切换可用驱动或请求用户手动接管。")
         return steps
 
     def _auto_learn_from_execution_session(
@@ -2685,11 +3388,7 @@ class ARIAManager:
         steps = self._refine_method_steps_from_report(actions, report)
         scene = (summary or "执行计划").strip()[:500]
         keywords = sorted(
-            {
-                str(a.get("type") or "").strip()
-                for a in (actions or [])
-                if str(a.get("type") or "").strip()
-            }
+            {str(a.get("type") or "").strip() for a in (actions or []) if str(a.get("type") or "").strip()}
         )[:10]
         method = {
             "scene": scene,
@@ -2847,9 +3546,10 @@ class ARIAManager:
                         continue
                 if vals:
                     avg_conf = sum(vals) / len(vals)
-            return {
+            out: dict[str, Any] = {
                 "success": True,
                 "session_id": session_id,
+                "session_kind": str(sess.get("session_kind") or "batch"),
                 "conversation_id": sess.get("conversation_id"),
                 "request_id": sess.get("request_id"),
                 "status": sess.get("status"),
@@ -2868,13 +3568,21 @@ class ARIAManager:
                     "avg_confidence": round(avg_conf, 4),
                 },
             }
+            if str(sess.get("session_kind") or "") == "react":
+                out["react_trace"] = sess.get("react_trace") or []
+                out["react_final_message"] = str(sess.get("react_final_message") or "")
+            return out
 
-    def _exec_kb_delete_all(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_kb_delete_all(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         all_methods = methodology_manager.get_all_methodologies() or []
         ids = [m.get("method_id") for m in all_methods if m.get("method_id")]
         return methodology_manager.delete_methodologies_batch(ids)
 
-    def _exec_kb_delete_by_keyword(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_kb_delete_by_keyword(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         kw = str((action.get("filters") or {}).get("keyword") or "").strip()
         candidates = methodology_manager.search_methodologies(kw) if kw else []
         ids = [m.get("method_id") for m in candidates if m.get("method_id")]
@@ -2882,7 +3590,9 @@ class ARIAManager:
         result["keyword"] = kw
         return result
 
-    def _exec_kb_delete_low_quality(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_kb_delete_low_quality(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         all_methods = methodology_manager.get_all_methodologies() or []
         ids = [
             m.get("method_id")
@@ -2891,12 +3601,16 @@ class ARIAManager:
         ]
         return methodology_manager.delete_methodologies_batch(ids)
 
-    def _exec_conversation_new(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_conversation_new(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         title = str((action.get("params") or {}).get("title") or "新会话")
         conv = conversation_manager.create_conversation(title)
         return {"success": True, "conversation_id": conv.get("conversation_id")}
 
-    def _exec_shell_run(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_shell_run(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         command = self._sanitize_shell_command(str(params.get("command") or ""))
         cwd = str(params.get("cwd") or ".")
@@ -3005,7 +3719,7 @@ class ARIAManager:
                     parts = line.split("\t")
                 else:
                     parts = re.split(r",", line)
-                parts = [p.strip() for p in parts][: _OFFICE_MAX_COLS]
+                parts = [p.strip() for p in parts][:_OFFICE_MAX_COLS]
                 for c_idx, val in enumerate(parts, 1):
                     ws.cell(row=r_idx, column=c_idx, value=val)
         wb.save(str(path))
@@ -3026,7 +3740,7 @@ class ARIAManager:
             except Exception:
                 bullets_raw = None
         if isinstance(bullets_raw, list):
-            b_lines = [str(b).strip() for b in bullets_raw if str(b).strip()][: _OFFICE_MAX_PPT_BULLETS]
+            b_lines = [str(b).strip() for b in bullets_raw if str(b).strip()][:_OFFICE_MAX_PPT_BULLETS]
         else:
             b_lines = []
         if not title and lines:
@@ -3051,7 +3765,9 @@ class ARIAManager:
                 p.level = 0
         prs.save(str(path))
 
-    def _exec_file_write(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_file_write(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         path = self._ensure_safe_path(str(params.get("path") or ""))
         mode = str(params.get("mode") or "overwrite").lower()
@@ -3065,7 +3781,12 @@ class ARIAManager:
             try:
                 if path.is_file() and has_style:
                     self._patch_office_docx_styles(path, docx_style)
-                    return {"success": True, "message": f"docx_style_patched:{path}", "artifacts": [str(path)], "screenshots": []}
+                    return {
+                        "success": True,
+                        "message": f"docx_style_patched:{path}",
+                        "artifacts": [str(path)],
+                        "screenshots": [],
+                    }
                 if path.is_file() and isinstance(p_dict.get("docx_style"), dict) and not has_style:
                     return {
                         "success": False,
@@ -3156,7 +3877,9 @@ class ARIAManager:
             f.write(content)
         return {"success": True, "message": f"file_written:{path}", "artifacts": [str(path)], "screenshots": []}
 
-    def _exec_file_move(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_file_move(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         src = self._ensure_safe_path(str(params.get("src") or ""))
         dst = self._ensure_safe_path(str(params.get("dst") or ""))
@@ -3164,7 +3887,9 @@ class ARIAManager:
         shutil.move(str(src), str(dst))
         return {"success": True, "message": f"moved:{src}->{dst}", "artifacts": [str(dst)], "screenshots": []}
 
-    def _exec_file_delete(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_file_delete(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         target = self._ensure_safe_path(str(params.get("path") or ""))
         if target.is_dir():
@@ -3201,9 +3926,7 @@ class ARIAManager:
                 raise
             raise ValueError("dns_failed") from e
 
-    def _http_get_bytes_capped(
-        self, url: str, max_bytes: int = 2_000_000
-    ) -> tuple[str, bytes, str, Optional[str]]:
+    def _http_get_bytes_capped(self, url: str, max_bytes: int = 2_000_000) -> tuple[str, bytes, str, Optional[str]]:
         self._assert_url_host_is_public(url)
         headers = {
             "User-Agent": (
@@ -3255,7 +3978,9 @@ class ARIAManager:
             return text[:max_chars] + f"\n... [正文已截断，共约 {len(text)} 字]"
         return text
 
-    def _exec_web_fetch(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_web_fetch(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") if isinstance(action.get("params"), dict) else {}
         url = self._resolve_fetch_url(action)
         max_chars = int(params.get("max_chars") or 32000)
@@ -3293,7 +4018,9 @@ class ARIAManager:
             return s
         return s[:lim] + f"\n... [stdout 已截断，总长 {len(s)}]"
 
-    def _exec_web_understand(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_web_understand(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") if isinstance(action.get("params"), dict) else {}
         url = self._resolve_fetch_url(action)
         question = str(params.get("question") or params.get("prompt") or "").strip()
@@ -3346,8 +4073,7 @@ class ARIAManager:
                 "role": "system",
                 "content": (
                     "你是网页阅读助手。只根据「网页摘录」作答，不要编造页面上没有的信息。"
-                    "若摘录不完整或无法回答，如实说明。用中文、条理清晰、尽量简洁。"
-                    + _MATH_NOTATION_FOR_CHAT
+                    "若摘录不完整或无法回答，如实说明。用中文、条理清晰、尽量简洁。" + _MATH_NOTATION_FOR_CHAT
                 ),
             },
             {
@@ -3371,7 +4097,9 @@ class ARIAManager:
             "screenshots": [],
         }
 
-    def _exec_browser_open(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_open(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         url = str(params.get("url") or "").strip()
         if not url:
@@ -3409,7 +4137,9 @@ class ARIAManager:
         webbrowser.open(url)
         return {"success": True, "message": f"browser_opened:{url}", "artifacts": [], "screenshots": shots}
 
-    def _exec_browser_click(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_click(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         selector = str(params.get("selector") or "").strip()
         nav = str(params.get("url") or "").strip() or None
@@ -3430,9 +4160,16 @@ class ARIAManager:
                 "artifacts": [],
                 "screenshots": shots,
             }
-        return {"success": True, "message": f"browser_click_simulated:{selector}", "artifacts": [], "screenshots": shots}
+        return {
+            "success": True,
+            "message": f"browser_click_simulated:{selector}",
+            "artifacts": [],
+            "screenshots": shots,
+        }
 
-    def _exec_browser_type(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_type(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         selector = str(params.get("selector") or "").strip()
         text = str(params.get("text") or "")
@@ -3464,7 +4201,9 @@ class ARIAManager:
             "screenshots": shots,
         }
 
-    def _exec_browser_find(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_find(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         selector = str(params.get("selector") or "").strip()
         text_contains = str(params.get("text_contains") or "").strip() or None
@@ -3488,7 +4227,9 @@ class ARIAManager:
             }
         return {"success": True, "message": f"browser_find_simulated:{selector}", "artifacts": [], "screenshots": shots}
 
-    def _exec_browser_hover(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_hover(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         selector = str(params.get("selector") or "").strip()
         shots = self._capture_screenshot("browser_hover")
@@ -3496,10 +4237,23 @@ class ARIAManager:
             ok, err = browser_driver.hover(selector)
             if ok:
                 return {"success": True, "message": f"browser_hover:{selector}", "artifacts": [], "screenshots": shots}
-            return {"success": False, "message": "browser_hover_failed", "stderr": err or "unknown", "artifacts": [], "screenshots": shots}
-        return {"success": True, "message": f"browser_hover_simulated:{selector}", "artifacts": [], "screenshots": shots}
+            return {
+                "success": False,
+                "message": "browser_hover_failed",
+                "stderr": err or "unknown",
+                "artifacts": [],
+                "screenshots": shots,
+            }
+        return {
+            "success": True,
+            "message": f"browser_hover_simulated:{selector}",
+            "artifacts": [],
+            "screenshots": shots,
+        }
 
-    def _exec_browser_select(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_select(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         selector = str(params.get("selector") or "").strip()
         value = str(params.get("value") or "").strip()
@@ -3507,11 +4261,29 @@ class ARIAManager:
         if browser_driver.is_playwright_enabled() and browser_driver.playwright_package_installed():
             ok, err = browser_driver.select_option(selector, value)
             if ok:
-                return {"success": True, "message": f"browser_select:{selector}={value}", "artifacts": [], "screenshots": shots}
-            return {"success": False, "message": "browser_select_failed", "stderr": err or "unknown", "artifacts": [], "screenshots": shots}
-        return {"success": True, "message": f"browser_select_simulated:{selector}", "artifacts": [], "screenshots": shots}
+                return {
+                    "success": True,
+                    "message": f"browser_select:{selector}={value}",
+                    "artifacts": [],
+                    "screenshots": shots,
+                }
+            return {
+                "success": False,
+                "message": "browser_select_failed",
+                "stderr": err or "unknown",
+                "artifacts": [],
+                "screenshots": shots,
+            }
+        return {
+            "success": True,
+            "message": f"browser_select_simulated:{selector}",
+            "artifacts": [],
+            "screenshots": shots,
+        }
 
-    def _exec_browser_upload(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_upload(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         selector = str(params.get("selector") or "").strip()
         file_path = str(params.get("file_path") or "").strip()
@@ -3519,22 +4291,58 @@ class ARIAManager:
         if browser_driver.is_playwright_enabled() and browser_driver.playwright_package_installed():
             ok, err = browser_driver.upload_file(selector, file_path)
             if ok:
-                return {"success": True, "message": f"browser_upload:{selector} -> {file_path}", "artifacts": [], "screenshots": shots}
-            return {"success": False, "message": "browser_upload_failed", "stderr": err or "unknown", "artifacts": [], "screenshots": shots}
-        return {"success": True, "message": f"browser_upload_simulated:{selector}", "artifacts": [], "screenshots": shots}
+                return {
+                    "success": True,
+                    "message": f"browser_upload:{selector} -> {file_path}",
+                    "artifacts": [],
+                    "screenshots": shots,
+                }
+            return {
+                "success": False,
+                "message": "browser_upload_failed",
+                "stderr": err or "unknown",
+                "artifacts": [],
+                "screenshots": shots,
+            }
+        return {
+            "success": True,
+            "message": f"browser_upload_simulated:{selector}",
+            "artifacts": [],
+            "screenshots": shots,
+        }
 
-    def _exec_browser_scroll(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_scroll(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         selector = str(params.get("selector") or "").strip() or None
         shots = self._capture_screenshot("browser_scroll")
         if browser_driver.is_playwright_enabled() and browser_driver.playwright_package_installed():
             ok, err = browser_driver.scroll_to(selector)
             if ok:
-                return {"success": True, "message": f"browser_scroll:{selector or 'bottom'}", "artifacts": [], "screenshots": shots}
-            return {"success": False, "message": "browser_scroll_failed", "stderr": err or "unknown", "artifacts": [], "screenshots": shots}
-        return {"success": True, "message": f"browser_scroll_simulated:{selector or 'bottom'}", "artifacts": [], "screenshots": shots}
+                return {
+                    "success": True,
+                    "message": f"browser_scroll:{selector or 'bottom'}",
+                    "artifacts": [],
+                    "screenshots": shots,
+                }
+            return {
+                "success": False,
+                "message": "browser_scroll_failed",
+                "stderr": err or "unknown",
+                "artifacts": [],
+                "screenshots": shots,
+            }
+        return {
+            "success": True,
+            "message": f"browser_scroll_simulated:{selector or 'bottom'}",
+            "artifacts": [],
+            "screenshots": shots,
+        }
 
-    def _exec_browser_wait(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_wait(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         selector = str(params.get("selector") or "").strip()
         timeout_ms = int(params.get("timeout_ms") or 30000)
@@ -3543,10 +4351,18 @@ class ARIAManager:
             ok, err = browser_driver.wait_for_element(selector, timeout_ms)
             if ok:
                 return {"success": True, "message": f"browser_wait:{selector}", "artifacts": [], "screenshots": shots}
-            return {"success": False, "message": "browser_wait_failed", "stderr": err or "unknown", "artifacts": [], "screenshots": shots}
+            return {
+                "success": False,
+                "message": "browser_wait_failed",
+                "stderr": err or "unknown",
+                "artifacts": [],
+                "screenshots": shots,
+            }
         return {"success": True, "message": f"browser_wait_simulated:{selector}", "artifacts": [], "screenshots": shots}
 
-    def _exec_browser_js(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_js(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         script = str(params.get("script") or "").strip()
         shots = self._capture_screenshot("browser_js")
@@ -3555,12 +4371,18 @@ class ARIAManager:
             if ok:
                 return {
                     "success": True,
-                    "message": f"browser_js executed",
+                    "message": "browser_js executed",
                     "stdout": json.dumps(result, ensure_ascii=False)[:500] if result else "",
                     "artifacts": [],
                     "screenshots": shots,
                 }
-            return {"success": False, "message": "browser_js_failed", "stderr": err or "unknown", "artifacts": [], "screenshots": shots}
+            return {
+                "success": False,
+                "message": "browser_js_failed",
+                "stderr": err or "unknown",
+                "artifacts": [],
+                "screenshots": shots,
+            }
         return {"success": True, "message": "browser_js_simulated", "artifacts": [], "screenshots": shots}
 
     def _path_to_image_data_url(self, path: Path) -> str | None:
@@ -3595,7 +4417,9 @@ class ARIAManager:
         except Exception:
             return None
 
-    def _exec_browser_press(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_browser_press(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         key = str(params.get("key") or "").strip()
         selector = str(params.get("selector") or "").strip() or None
@@ -3604,10 +4428,18 @@ class ARIAManager:
             ok, err = browser_driver.press_key(key, selector=selector)
             if ok:
                 return {"success": True, "message": f"browser_press:{key}", "artifacts": [], "screenshots": shots}
-            return {"success": False, "message": "browser_press_failed", "stderr": err or "unknown", "artifacts": [], "screenshots": shots}
+            return {
+                "success": False,
+                "message": "browser_press_failed",
+                "stderr": err or "unknown",
+                "artifacts": [],
+                "screenshots": shots,
+            }
         return {"success": True, "message": f"browser_press_simulated:{key}", "artifacts": [], "screenshots": shots}
 
-    def _exec_media_summarize(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_media_summarize(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") if isinstance(action.get("params"), dict) else {}
         url = str(params.get("url") or action.get("target") or "").strip()
         relpath = str(params.get("path") or "").strip()
@@ -3616,9 +4448,21 @@ class ARIAManager:
             try:
                 video_path = self._ensure_safe_path(relpath)
             except ValueError as e:
-                return {"success": False, "message": "invalid_path", "stderr": str(e), "artifacts": [], "screenshots": []}
+                return {
+                    "success": False,
+                    "message": "invalid_path",
+                    "stderr": str(e),
+                    "artifacts": [],
+                    "screenshots": [],
+                }
             if not video_path.is_file():
-                return {"success": False, "message": "video_not_found", "stderr": str(video_path), "artifacts": [], "screenshots": []}
+                return {
+                    "success": False,
+                    "message": "video_not_found",
+                    "stderr": str(video_path),
+                    "artifacts": [],
+                    "screenshots": [],
+                }
             suf = video_path.suffix.lower()
             if suf not in (".mp4", ".webm", ".mov", ".mkv"):
                 return {
@@ -3658,7 +4502,13 @@ class ARIAManager:
                     "screenshots": [],
                 }
             except subprocess.TimeoutExpired:
-                return {"success": False, "message": "ffmpeg_timeout", "stderr": "ffmpeg 超时", "artifacts": [], "screenshots": []}
+                return {
+                    "success": False,
+                    "message": "ffmpeg_timeout",
+                    "stderr": "ffmpeg 超时",
+                    "artifacts": [],
+                    "screenshots": [],
+                }
             if proc.returncode != 0:
                 return {
                     "success": False,
@@ -3674,7 +4524,13 @@ class ARIAManager:
                 if du:
                     parts.append({"type": "image_url", "image_url": {"url": du}})
             if len(parts) <= 1:
-                return {"success": False, "message": "no_frames", "stderr": "未能生成抽帧图片", "artifacts": [], "screenshots": []}
+                return {
+                    "success": False,
+                    "message": "no_frames",
+                    "stderr": "未能生成抽帧图片",
+                    "artifacts": [],
+                    "screenshots": [],
+                }
             messages = [{"role": "user", "content": parts}]
             summary = self._call_llm(messages, fallback_text="（模型不可用或未返回摘要）", agent_code="MediaSummarizer")
             return {
@@ -3698,7 +4554,13 @@ class ARIAManager:
                     fallback_text=blurb,
                     agent_code="MediaSummarizer",
                 )
-                return {"success": True, "message": "media_summarize_oembed", "stdout": follow[:8000], "artifacts": [], "screenshots": []}
+                return {
+                    "success": True,
+                    "message": "media_summarize_oembed",
+                    "stdout": follow[:8000],
+                    "artifacts": [],
+                    "screenshots": [],
+                }
         return {
             "success": False,
             "message": "media_summarize_need_path",
@@ -3707,7 +4569,9 @@ class ARIAManager:
             "screenshots": [],
         }
 
-    def _exec_desktop_open_app(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_desktop_open_app(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         app = str(params.get("app") or "").strip()
         if not app:
@@ -3786,15 +4650,13 @@ class ARIAManager:
             "fallback_used": False,
         }
 
-    def _exec_desktop_hotkey(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_desktop_hotkey(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         hotkey = str(params.get("hotkey") or "").strip()
         shots = self._capture_screenshot("desktop_hotkey")
-        if (
-            desktop_uia.is_uia_enabled()
-            and os.name == "nt"
-            and desktop_uia.pywinauto_package_installed()
-        ):
+        if desktop_uia.is_uia_enabled() and os.name == "nt" and desktop_uia.pywinauto_package_installed():
             ok, err = desktop_uia.send_hotkey(hotkey)
             if ok:
                 return {
@@ -3812,15 +4674,13 @@ class ARIAManager:
             }
         return {"success": True, "message": f"desktop_hotkey_simulated:{hotkey}", "artifacts": [], "screenshots": shots}
 
-    def _exec_desktop_type(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_desktop_type(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         params = action.get("params") or {}
         text = str(params.get("text") or params.get("content") or "")
         shots = self._capture_screenshot("desktop_type")
-        if (
-            desktop_uia.is_uia_enabled()
-            and os.name == "nt"
-            and desktop_uia.pywinauto_package_installed()
-        ):
+        if desktop_uia.is_uia_enabled() and os.name == "nt" and desktop_uia.pywinauto_package_installed():
             ok, err = desktop_uia.type_text(text)
             if ok:
                 return {
@@ -3846,7 +4706,9 @@ class ARIAManager:
             "screenshots": shots,
         }
 
-    def _exec_desktop_sequence(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_desktop_sequence(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         """顺序执行多步：sleep / hotkey / type，用于任意桌面应用脚本（params.steps）。"""
         params = action.get("params") or {}
         steps = params.get("steps")
@@ -3862,11 +4724,7 @@ class ARIAManager:
                 "safe_block_reason": "unsafe_to_continue",
             }
         shots = self._capture_screenshot("desktop_sequence")
-        real = (
-            desktop_uia.is_uia_enabled()
-            and os.name == "nt"
-            and desktop_uia.pywinauto_package_installed()
-        )
+        real = desktop_uia.is_uia_enabled() and os.name == "nt" and desktop_uia.pywinauto_package_installed()
         log_parts: list[str] = []
         for step in steps:
             if not isinstance(step, dict):
@@ -3952,10 +4810,12 @@ class ARIAManager:
             "fallback_used": False,
         }
 
-    def _exec_wechat_send_message(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_wechat_send_message(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         """
         执行微信发送消息动作
-        
+
         params:
             contact_name: 联系人名称
             message: 消息内容
@@ -3964,19 +4824,9 @@ class ARIAManager:
         """
         params = action.get("params") or {}
         request_id = str(action.get("_request_id") or self.current_request_id or "").strip()
-        contact_name = str(
-            params.get("contact_name")
-            or params.get("contact")
-            or action.get("target")
-            or ""
-        ).strip()
+        contact_name = str(params.get("contact_name") or params.get("contact") or action.get("target") or "").strip()
         message = str(params.get("message") or params.get("content") or "")
-        raw_contact_hint = (
-            params.get("contact_hint")
-            or params.get("hint")
-            or params.get("disambiguation_hint")
-            or ""
-        )
+        raw_contact_hint = params.get("contact_hint") or params.get("hint") or params.get("disambiguation_hint") or ""
         contact_hint = str(raw_contact_hint).strip()
         if not contact_hint:
             contact_hint = None
@@ -3989,23 +4839,25 @@ class ARIAManager:
             "yes",
             "on",
         )
-        
+
         # 检查配置
         prefer_desktop = os.getenv("ARIA_WECHAT_PREFER_DESKTOP", "1").strip().lower() in ("1", "true", "yes", "on")
         if not prefer_desktop:
             use_desktop = False
-        
+
         # 关键改进：如果桌面版可用，强制使用桌面版
         if wechat_driver.is_desktop_available() and os.name == "nt":
             use_desktop = True
             logger.info("检测到桌面微信可用，强制使用桌面版")
-        
+
         shots: list[str] = []
-        
+
         # 检查是否有可用的驱动
         if not wechat_driver.is_desktop_available() and not wechat_driver.is_web_available():
             hint = wechat_driver.driver_install_hint()
-            msg = "wechat_driver_not_available:微信自动化驱动不可用。" + (hint or "请安装 pywinauto（Windows）或 playwright。")
+            msg = "wechat_driver_not_available:微信自动化驱动不可用。" + (
+                hint or "请安装 pywinauto（Windows）或 playwright。"
+            )
             return {
                 "success": False,
                 "message": msg,
@@ -4014,7 +4866,7 @@ class ARIAManager:
                 "artifacts": [],
                 "screenshots": shots,
             }
-        
+
         # 检查联系人和消息（已打开会话且仅发消息时可为空名，但建议仍填以便日志）
         if not contact_name and not skip_contact_search:
             return {
@@ -4024,7 +4876,7 @@ class ARIAManager:
                 "artifacts": [],
                 "screenshots": shots,
             }
-        
+
         if not message:
             return {
                 "success": False,
@@ -4033,7 +4885,7 @@ class ARIAManager:
                 "artifacts": [],
                 "screenshots": shots,
             }
-        
+
         try:
             if self.is_cancelled(request_id):
                 return {
@@ -4046,7 +4898,7 @@ class ARIAManager:
                 }
             # 创建路由器
             router = wechat_driver.create_router(prefer_desktop=use_desktop, is_enterprise=is_enterprise)
-            
+
             # 发送消息（先执行再截屏，避免截屏抢占焦点导致快捷键落到浏览器）
             result = router.send_message(
                 contact_name,
@@ -4065,12 +4917,12 @@ class ARIAManager:
                     "screenshots": shots,
                 }
             shots = self._capture_screenshot("wechat_send")
-            
+
             if result.get("success"):
                 method = result.get("method", "unknown")
                 fallback_msg = "（回退到网页版）" if result.get("fallback_used") else ""
                 warning = result.get("warning")
-                
+
                 # 构建响应消息 - 不再说"已发送"，而是"已执行发送操作"
                 response = {
                     "success": True,
@@ -4082,14 +4934,14 @@ class ARIAManager:
                     "confidence": 0.86,
                     "fallback_used": bool(result.get("fallback_used")),
                 }
-                
+
                 # 添加警告信息（如果有）
                 if warning:
                     response["warning"] = warning
                     response["stdout"] += f"\n\n⚠️ 重要提示：\n{warning}\n\n请检查微信窗口确认消息是否真正发送成功。"
                 else:
                     response["stdout"] += "\n\n请检查微信窗口确认消息已送达。"
-                
+
                 return response
             else:
                 error = result.get("error", "unknown")
@@ -4117,7 +4969,7 @@ class ARIAManager:
                     "confidence": 0.3,
                     "safe_block_reason": "unresolved_target",
                 }
-                
+
         except Exception as e:
             shots = self._capture_screenshot("wechat_send_err")
             return {
@@ -4128,36 +4980,33 @@ class ARIAManager:
                 "screenshots": shots,
             }
 
-    def _exec_wechat_open_chat(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_wechat_open_chat(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         """
         执行打开微信聊天窗口动作
-        
+
         params:
             contact_name: 联系人名称
             use_desktop: 是否优先使用桌面客户端（默认 True）
             is_enterprise: 是否为企业微信（默认 False）
         """
         params = action.get("params") or {}
-        contact_name = str(
-            params.get("contact_name")
-            or params.get("contact")
-            or action.get("target")
-            or ""
-        ).strip()
+        contact_name = str(params.get("contact_name") or params.get("contact") or action.get("target") or "").strip()
         use_desktop = params.get("use_desktop", True)
         is_enterprise = params.get("is_enterprise", False)
-        
+
         prefer_desktop = os.getenv("ARIA_WECHAT_PREFER_DESKTOP", "1").strip().lower() in ("1", "true", "yes", "on")
         if not prefer_desktop:
             use_desktop = False
-        
+
         # 关键改进：如果桌面版可用，强制使用桌面版
         if wechat_driver.is_desktop_available() and os.name == "nt":
             use_desktop = True
             logger.info("检测到桌面微信可用，强制使用桌面版")
-        
+
         shots: list[str] = []
-        
+
         if not contact_name:
             return {
                 "success": False,
@@ -4166,12 +5015,12 @@ class ARIAManager:
                 "artifacts": [],
                 "screenshots": shots,
             }
-        
+
         try:
             router = wechat_driver.create_router(prefer_desktop=use_desktop, is_enterprise=is_enterprise)
             result = router.open_chat(contact_name)
             shots = self._capture_screenshot("wechat_open")
-            
+
             if result.get("success"):
                 method = result.get("method", "unknown")
                 return {
@@ -4190,7 +5039,7 @@ class ARIAManager:
                     "artifacts": [],
                     "screenshots": shots,
                 }
-                
+
         except Exception as e:
             shots = self._capture_screenshot("wechat_open_err")
             return {
@@ -4201,27 +5050,29 @@ class ARIAManager:
                 "screenshots": shots,
             }
 
-    def _exec_wechat_check_login(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_wechat_check_login(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         """
         执行检查微信登录状态动作
-        
+
         params:
             is_enterprise: 是否为企业微信（默认 False）
         """
         params = action.get("params") or {}
         is_enterprise = params.get("is_enterprise", False)
-        
+
         shots: list[str] = []
-        
+
         try:
             prefer_desktop = os.getenv("ARIA_WECHAT_PREFER_DESKTOP", "1").strip().lower() in ("1", "true", "yes", "on")
             router = wechat_driver.create_router(prefer_desktop=prefer_desktop, is_enterprise=is_enterprise)
             login_status = router.check_login()
             shots = self._capture_screenshot("wechat_login")
-            
+
             desktop_status = login_status.get("desktop_logged_in", False)
             web_status = login_status.get("web_logged_in", False)
-            
+
             if desktop_status or web_status:
                 status_msg = []
                 if desktop_status:
@@ -4243,7 +5094,7 @@ class ARIAManager:
                     "artifacts": [],
                     "screenshots": shots,
                 }
-                
+
         except Exception as e:
             shots = self._capture_screenshot("wechat_login_err")
             return {
@@ -4254,10 +5105,12 @@ class ARIAManager:
                 "screenshots": shots,
             }
 
-    def _exec_screen_ocr(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_screen_ocr(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         """
         执行屏幕 OCR 识别
-        
+
         params:
             region: 可选，(left, top, width, height) 或 None（全屏）
             lang: OCR 语言，默认 'chi_sim+eng'
@@ -4265,11 +5118,11 @@ class ARIAManager:
         params = action.get("params") or {}
         region = params.get("region")
         lang = params.get("lang", "chi_sim+eng")
-        
+
         shots = self._capture_screenshot("screen_ocr")
-        
+
         result = screen_ocr.ocr_screen(region, lang)
-        
+
         if result.get("success"):
             text_preview = result.get("text", "")[:500]
             blocks_count = len(result.get("blocks", []))
@@ -4292,10 +5145,12 @@ class ARIAManager:
                 "screenshots": shots,
             }
 
-    def _exec_screen_find_text(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_screen_find_text(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         """
         执行屏幕文字查找
-        
+
         params:
             text: 要查找的文字（必填）
             region: 可选，(left, top, width, height) 或 None（全屏）
@@ -4305,9 +5160,9 @@ class ARIAManager:
         search_text = params.get("text", "")
         region = params.get("region")
         lang = params.get("lang", "chi_sim+eng")
-        
+
         shots = self._capture_screenshot("screen_find_text")
-        
+
         if not search_text.strip():
             return {
                 "success": False,
@@ -4316,9 +5171,9 @@ class ARIAManager:
                 "artifacts": [],
                 "screenshots": shots,
             }
-        
+
         result = screen_ocr.find_text_on_screen(search_text, region, lang)
-        
+
         if result.get("success"):
             matches = result.get("matches", [])
             if matches:
@@ -4326,7 +5181,7 @@ class ARIAManager:
                 return {
                     "success": True,
                     "message": f"screen_find_text_found:找到{len(matches)}处匹配",
-                    "stdout": f"找到位置：\n" + "\n".join(positions),
+                    "stdout": "找到位置：\n" + "\n".join(positions),
                     "artifacts": [],
                     "screenshots": shots,
                 }
@@ -4348,10 +5203,12 @@ class ARIAManager:
                 "screenshots": shots,
             }
 
-    def _exec_screen_click_text(self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any) -> dict[str, Any]:
+    def _exec_screen_click_text(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
         """
         执行点击屏幕文字
-        
+
         params:
             text: 要点击的文字（必填）
             region: 可选，(left, top, width, height) 或 None（全屏）
@@ -4363,9 +5220,9 @@ class ARIAManager:
         region = params.get("region")
         lang = params.get("lang", "chi_sim+eng")
         button = params.get("button", "left")
-        
+
         shots = self._capture_screenshot("screen_click_text")
-        
+
         if not search_text.strip():
             return {
                 "success": False,
@@ -4374,9 +5231,9 @@ class ARIAManager:
                 "artifacts": [],
                 "screenshots": shots,
             }
-        
+
         result = screen_ocr.click_text(search_text, region, lang, button)
-        
+
         if result.get("success"):
             position = result.get("position")
             pos_str = f"位置 ({position[0]}, {position[1]})" if position else ""
@@ -4410,9 +5267,7 @@ class ARIAManager:
             },
             {"role": "user", "content": self._user_content_with_optional_vision(user_line)},
         ]
-        llm_text = self._call_llm(
-            messages, fallback_text="", agent_code="TextExecAgent", reasoning_effort="minimal"
-        )
+        llm_text = self._call_llm(messages, fallback_text="", agent_code="TextExecAgent", reasoning_effort="minimal")
         cleaned = (llm_text or "").strip()
         if cleaned:
             cleaned = cleaned.replace("```", "").strip()
@@ -4464,11 +5319,11 @@ class ARIAManager:
             {
                 "role": "user",
                 "content": self._user_content_with_optional_vision(
-                    (
+                    
                         f"【本会话近期对话】\n{(dialogue_context or '').strip()}\n\n用户输入：{user_input}"
                         if (dialogue_context or "").strip()
                         else f"用户输入：{user_input}"
-                    )
+                    
                 ),
             },
         ]
@@ -4505,7 +5360,7 @@ class ARIAManager:
         self.stm.task_id = task_info["task_id"]
         self.stm.user_input = user_input
         self.stm.temporal_risk = str(task_info.get("temporal_risk") or "low")
-        
+
         self.record_model_thought("TaskParser", f"任务解析完成，任务类型: {task_info['task_type']}")
         self.push_event(
             "task_parse",
@@ -4551,7 +5406,7 @@ class ARIAManager:
         # 从长期记忆中搜索方法论：传入用户原始输入，尽量包含“场景”语义
         query = (task_info.get("user_input") or "").strip()
         results = self.ltm.search_methodology(query)
-        
+
         best_match = None
         best_score = 0.0
         ab_meta: dict[str, Any] = {}
@@ -4674,7 +5529,7 @@ class ARIAManager:
                 "role": "user",
                 "content": self._user_content_with_optional_vision(
                     f"任务时效(temporal_risk)：{temporal}（high 表示结论会过期，步骤必须是可重复的获取与校验流程）。\n\n"
-                    f"用户需求：{task_info.get('user_input','')}\n\n"
+                    f"用户需求：{task_info.get('user_input', '')}\n\n"
                     "请给出：1) scene，2) keywords，3) solve_steps（4-8条），4) applicable_range，5) 必要时 outcome_type。"
                 ),
             },
@@ -4705,7 +5560,7 @@ class ARIAManager:
         self.check_cancelled("task_split_start")
         self.push_event("task_split", "running", "TaskSplitter", "PM 正在拆分子任务")
         self.push_log("TaskSplitter", "正在拆分任务", "running")
-        
+
         # 多任务拆解：如果检测到多个独立任务，为每个任务生成执行步骤
         multi_tasks = task_info.get("multi_tasks") or []
         if len(multi_tasks) > 1:
@@ -4721,7 +5576,7 @@ class ARIAManager:
                         "role": "system",
                         "content": (
                             "你是 ARIA 任务拆分器。请根据任务目标生成 2-4 个可执行的子任务步骤。只输出严格 JSON。"
-                            "JSON 格式：{\"sub_tasks\": [{\"step\": \"步骤 1\", \"description\": \"描述\", \"agent_type\": \"TextExecAgent\"}, ...]}"
+                            'JSON 格式：{"sub_tasks": [{"step": "步骤 1", "description": "描述", "agent_type": "TextExecAgent"}, ...]}'
                             "agent_type 只能是 TextExecAgent / VisionExecAgent / SpeechExecAgent。"
                         ),
                     },
@@ -4739,23 +5594,35 @@ class ARIAManager:
                     step = str(step_item.get("step") or "")
                     atype = str(step_item.get("agent_type") or "TextExecAgent")
                     desc = str(step_item.get("description") or f"执行{step}")
-                    pb = str(step_item.get("persona_brief") or "").strip() or self._default_persona_brief(atype, step, desc)
-                    all_sub_tasks.append({
-                        "sub_task_id": str(uuid.uuid4()),
-                        "task_id": task_info["task_id"],
-                        "task_index": idx,
-                        "step": step,
-                        "description": desc,
-                        "agent_type": atype,
-                        "persona_brief": pb,
-                        "goal": goal,
-                    })
-            self.record_model_thought("TaskSplitter", f"多任务拆解完成，共{len(multi_tasks)}个任务，{len(all_sub_tasks)}个子任务")
-            self.push_event("task_split", "success", "TaskSplitter", f"任务拆分完成，共{len(all_sub_tasks)}个子任务", {"sub_tasks": all_sub_tasks})
+                    pb = str(step_item.get("persona_brief") or "").strip() or self._default_persona_brief(
+                        atype, step, desc
+                    )
+                    all_sub_tasks.append(
+                        {
+                            "sub_task_id": str(uuid.uuid4()),
+                            "task_id": task_info["task_id"],
+                            "task_index": idx,
+                            "step": step,
+                            "description": desc,
+                            "agent_type": atype,
+                            "persona_brief": pb,
+                            "goal": goal,
+                        }
+                    )
+            self.record_model_thought(
+                "TaskSplitter", f"多任务拆解完成，共{len(multi_tasks)}个任务，{len(all_sub_tasks)}个子任务"
+            )
+            self.push_event(
+                "task_split",
+                "success",
+                "TaskSplitter",
+                f"任务拆分完成，共{len(all_sub_tasks)}个子任务",
+                {"sub_tasks": all_sub_tasks},
+            )
             self.push_log("TaskSplitter", f"任务拆分完成，共{len(all_sub_tasks)}个子任务", "completed")
             self.check_cancelled("task_split_end")
             return all_sub_tasks
-        
+
         # 记录模型思考过程
         self.record_model_thought("TaskSplitter", f"基于方法论拆分子任务，用户输入: {task_info['user_input']}")
         self.record_model_thought("TaskSplitter", f"方法论步骤: {method.get('solve_steps', [])}")
@@ -4792,7 +5659,7 @@ class ARIAManager:
             {
                 "role": "user",
                 "content": self._user_content_with_optional_vision(
-                    f"任务原始输入：{task_info.get('user_input','')}\n\n方法论场景(scene)：{method.get('scene','') or method.get('scenario','')}\n\nsolve_steps：{steps}"
+                    f"任务原始输入：{task_info.get('user_input', '')}\n\n方法论场景(scene)：{method.get('scene', '') or method.get('scenario', '')}\n\nsolve_steps：{steps}"
                 ),
             },
         ]
@@ -4819,10 +5686,10 @@ class ARIAManager:
                         "persona_brief": pb,
                     }
                 )
-        
+
         # 写入短期记忆
         self.stm.sub_tasks = sub_tasks
-        
+
         self.record_model_thought("TaskSplitter", f"任务拆分完成，共{len(sub_tasks)}个子任务")
         self.push_event(
             "task_split",
@@ -4868,10 +5735,10 @@ class ARIAManager:
                 "TaskSplitter",
                 f"生成Agent: {agent_type}({assigned_name})，统一模型: {self.unified_model}",
             )
-        
+
         # 写入短期记忆
         self.stm.agent_status = agent_status
-        
+
         self.record_model_thought("TaskSplitter", f"Agent生成完成，共{len(agents)}个Agent")
         self.push_event(
             "agent_create",
@@ -4892,7 +5759,6 @@ class ARIAManager:
     ) -> list:
         self.check_cancelled("agent_execute_start")
         results: list[dict[str, Any]] = []
-        previous_results_text = ""
         method_ctx = self._methodology_summary_text(method) if method else ""
         for agent_id, agent in agents.items():
             self.check_cancelled("agent_execute_loop")
@@ -4929,12 +5795,12 @@ class ARIAManager:
                 )
             sys_parts.extend(
                 [
-                "本链路仅为文本推理：你没有调用 file_write、没有访问用户磁盘。严禁声称「已成功创建/保存 .docx」「已写入 我的文档/此电脑>文档」等；若用户要可下载文件，应明确说明须由用户在动作计划中「确认执行」file_write 到工作区，或自行在本机用 Word 另存。",
-                "用户可通过网页回形针上传文件；若子任务涉及已上传文件，正文可能在「原始任务输入」的附件摘要中。不要编造用户未提供的文件内容。",
-                "涉及「创建文档/保存文件」时：不要因未安装 Word 就拒绝；应给出可落地方案——例如建议相对路径如 data/artifacts/xxx.md、记事本或 WPS/LibreOffice/VS Code 等替代、以及可复制粘贴的正文草稿。",
-                "若仍缺关键信息（路径、格式、是否覆盖），在答复末尾用简短编号列出 1～3 个需用户确认的问题。",
-                "【总指挥设定的人设与要求】",
-                persona,
+                    "本链路仅为文本推理：你没有调用 file_write、没有访问用户磁盘。严禁声称「已成功创建/保存 .docx」「已写入 我的文档/此电脑>文档」等；若用户要可下载文件，应明确说明须由用户在动作计划中「确认执行」file_write 到工作区，或自行在本机用 Word 另存。",
+                    "用户可通过网页回形针上传文件；若子任务涉及已上传文件，正文可能在「原始任务输入」的附件摘要中。不要编造用户未提供的文件内容。",
+                    "涉及「创建文档/保存文件」时：不要因未安装 Word 就拒绝；应给出可落地方案——例如建议相对路径如 data/artifacts/xxx.md、记事本或 WPS/LibreOffice/VS Code 等替代、以及可复制粘贴的正文草稿。",
+                    "若仍缺关键信息（路径、格式、是否覆盖），在答复末尾用简短编号列出 1～3 个需用户确认的问题。",
+                    "【总指挥设定的人设与要求】",
+                    persona,
                 ]
             )
             user_parts = []
@@ -4942,11 +5808,12 @@ class ARIAManager:
                 user_parts.append(f"【本会话近期对话（与当前任务同一线程）】\n{(dialogue_context or '').strip()}")
             if method_ctx:
                 user_parts.append(method_ctx)
+            previous_results_text = self._build_exec_context_window(results)
             user_parts.extend(
                 [
                     f"原始任务输入：{self.stm.user_input}",
-                    f"当前子任务步骤(step)：{task.get('step','')}",
-                    f"子任务描述(description)：{task.get('description','')}",
+                    f"当前子任务步骤(step)：{task.get('step', '')}",
+                    f"子任务描述(description)：{task.get('description', '')}",
                     "【此前各执行者的完整产出（请完整理解，勿遗漏细节；执行链为纯文本传递，无二次解析）】",
                     previous_results_text if previous_results_text else "（尚无）",
                     "",
@@ -4991,13 +5858,29 @@ class ARIAManager:
                 agent_name_override=agent_name,
             )
 
-            previous_results_text = self._format_exec_results_as_plain_text(results)
-        
         # 写入短期记忆
         self.stm.results = results
-        
+
         self.check_cancelled("agent_execute_end")
         return results
+
+    def _build_exec_context_window(self, results: list[dict[str, Any]]) -> str:
+        """子 Agent 隔离：只透传最近若干步骤，并限制总字符，避免噪声在链路中累积。"""
+        if not results:
+            return ""
+        try:
+            max_steps = max(1, int(os.getenv("ARIA_AGENT_CONTEXT_MAX_STEPS", "4") or "4"))
+        except (TypeError, ValueError):
+            max_steps = 4
+        try:
+            max_chars = max(1000, int(os.getenv("ARIA_AGENT_CONTEXT_MAX_CHARS", "5000") or "5000"))
+        except (TypeError, ValueError):
+            max_chars = 5000
+        window = results[-max_steps:]
+        text = self._format_exec_results_as_plain_text(window)
+        if len(text) <= max_chars:
+            return text
+        return "…[历史执行上下文已截断]\n" + text[-max_chars:]
 
     # 7. 校验结果
     def check_result(self, results: list) -> dict:
@@ -5007,7 +5890,7 @@ class ARIAManager:
         # 记录模型思考过程
         self.record_model_thought("QualityChecker", f"开始校验结果，共{len(results)}个结果")
         for i, result in enumerate(results):
-            self.record_model_thought("QualityChecker", f"校验第{i+1}个结果：{result['result']}")
+            self.record_model_thought("QualityChecker", f"校验第{i + 1}个结果：{result['result']}")
 
         fallback_final = "\n".join([result["result"] for result in results])
         steps_plain = self._format_exec_results_as_plain_text(results if isinstance(results, list) else [])
@@ -5081,10 +5964,7 @@ class ARIAManager:
         should_save, skip_reason, judge_source = self._should_save_methodology(task_info, method or {}, result_payload)
         if not should_save:
             self._record_method_feedback(task_info, method or {}, result_payload)
-            self.record_model_thought(
-                "MethodSaver",
-                f"知识沉淀判定为跳过，reason={skip_reason}, source={judge_source}"
-            )
+            self.record_model_thought("MethodSaver", f"知识沉淀判定为跳过，reason={skip_reason}, source={judge_source}")
             self.push_event(
                 "method_save",
                 "success",
@@ -5103,12 +5983,10 @@ class ARIAManager:
         self.record_model_thought("MethodSaver", "将方法论保存到长期记忆")
 
         is_success = False
-        final_result_text = ""
         if isinstance(result_payload, dict):
             is_success = bool(result_payload.get("is_success", False))
-            final_result_text = str(result_payload.get("final_result", ""))
         else:
-            final_result_text = str(result_payload)
+            is_success = False
 
         normalized_method = self._normalize_methodology(method or {}, task_info)
         normalized_method["success_count"] = 1 if is_success else 0
@@ -5118,7 +5996,9 @@ class ARIAManager:
             if isinstance(quality_metrics, dict):
                 normalized_method["quality_metrics"] = quality_metrics
             try:
-                normalized_method["score"] = float(result_payload.get("score", normalized_method.get("score", 0.0)) or 0.0)
+                normalized_method["score"] = float(
+                    result_payload.get("score", normalized_method.get("score", 0.0)) or 0.0
+                )
             except Exception:
                 normalized_method["score"] = float(normalized_method.get("score", 0.0) or 0.0)
         normalized_method.setdefault("evidence_refs", [])
@@ -5128,13 +6008,13 @@ class ARIAManager:
 
         self.ltm.add_methodology(normalized_method)
         self._record_method_feedback(task_info, normalized_method, result_payload)
-        
+
         # 保存到中期记忆作为模板
         task_template = {
             "template_id": str(uuid.uuid4()),
             "task_type": task_info["task_type"],
             "solve_steps": normalized_method["solve_steps"],
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         self.mtm.task_templates.append(task_template)
         self.mtm.save()
@@ -5160,12 +6040,7 @@ class ARIAManager:
 
     # 10. 推送日志到UI
     def push_log(self, agent_name: str, content: str, status="running"):
-        log_entry = {
-            "agent": agent_name,
-            "content": content,
-            "status": status,
-            "timestamp": time.time()
-        }
+        log_entry = {"agent": agent_name, "content": content, "status": status, "timestamp": time.time()}
         self.execution_log.append(log_entry)
         # 同时写入短期记忆
         self.stm.logs.append(log_entry)

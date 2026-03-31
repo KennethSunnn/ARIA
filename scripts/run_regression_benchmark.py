@@ -1,8 +1,9 @@
+import argparse
 import json
 import sys
-import argparse
 import time
 from pathlib import Path
+from typing import Any
 
 
 def main() -> None:
@@ -56,7 +57,7 @@ def main() -> None:
     hit_cases = sum(1 for r in rows if int(r["expected_hit"]) > 0)
     strict_cases = sum(1 for r in rows if bool(r.get("strict_ok")))
     total = len(rows)
-    summary = {
+    summary: dict[str, Any] = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "total_cases": total,
         "matched_cases": hit_cases,
@@ -72,11 +73,11 @@ def main() -> None:
     out_file.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print(f"\nSaved report to: {out_file}")
-    if summary["match_rate"] < float(args.min_match_rate or 0.0):
+    if float(summary["match_rate"] or 0.0) < float(args.min_match_rate or 0.0):
         raise SystemExit(
             f"benchmark failed: match_rate={summary['match_rate']:.4f} < min_match_rate={float(args.min_match_rate):.4f}"
         )
-    if summary["strict_pass_rate"] < float(args.min_strict_pass_rate or 0.0):
+    if float(summary["strict_pass_rate"] or 0.0) < float(args.min_strict_pass_rate or 0.0):
         raise SystemExit(
             "benchmark failed: strict_pass_rate="
             f"{summary['strict_pass_rate']:.4f} < min_strict_pass_rate={float(args.min_strict_pass_rate):.4f}"
