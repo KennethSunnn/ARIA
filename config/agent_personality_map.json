@@ -1,0 +1,1979 @@
+{
+  "version": 2,
+  "scope": "full_catalog",
+  "stats": {
+    "departments": 14,
+    "agents": 178
+  },
+  "global_profiles": [
+    {
+      "id": "academic-anthropologist",
+      "label": "Academic Anthropologist",
+      "department": "academic",
+      "domain": "academic",
+      "file": "academic/academic-anthropologist.md",
+      "weight": 1.0,
+      "tags": [
+        "academic"
+      ]
+    },
+    {
+      "id": "academic-geographer",
+      "label": "Academic Geographer",
+      "department": "academic",
+      "domain": "academic",
+      "file": "academic/academic-geographer.md",
+      "weight": 1.0,
+      "tags": [
+        "academic"
+      ]
+    },
+    {
+      "id": "academic-historian",
+      "label": "Academic Historian",
+      "department": "academic",
+      "domain": "academic",
+      "file": "academic/academic-historian.md",
+      "weight": 1.0,
+      "tags": [
+        "academic"
+      ]
+    },
+    {
+      "id": "academic-narratologist",
+      "label": "Academic Narratologist",
+      "department": "academic",
+      "domain": "academic",
+      "file": "academic/academic-narratologist.md",
+      "weight": 1.0,
+      "tags": [
+        "academic"
+      ]
+    },
+    {
+      "id": "academic-psychologist",
+      "label": "Academic Psychologist",
+      "department": "academic",
+      "domain": "academic",
+      "file": "academic/academic-psychologist.md",
+      "weight": 1.0,
+      "tags": [
+        "academic"
+      ]
+    },
+    {
+      "id": "design-brand-guardian",
+      "label": "Design Brand Guardian",
+      "department": "design",
+      "domain": "design",
+      "file": "design/design-brand-guardian.md",
+      "weight": 1.0,
+      "tags": [
+        "design"
+      ]
+    },
+    {
+      "id": "design-image-prompt-engineer",
+      "label": "Design Image Prompt Engineer",
+      "department": "design",
+      "domain": "design",
+      "file": "design/design-image-prompt-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "design"
+      ]
+    },
+    {
+      "id": "design-inclusive-visuals-specialist",
+      "label": "Design Inclusive Visuals Specialist",
+      "department": "design",
+      "domain": "design",
+      "file": "design/design-inclusive-visuals-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "design"
+      ]
+    },
+    {
+      "id": "design-ui-designer",
+      "label": "Design Ui Designer",
+      "department": "design",
+      "domain": "design",
+      "file": "design/design-ui-designer.md",
+      "weight": 1.0,
+      "tags": [
+        "design"
+      ]
+    },
+    {
+      "id": "design-ux-architect",
+      "label": "Design Ux Architect",
+      "department": "design",
+      "domain": "design",
+      "file": "design/design-ux-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "design"
+      ]
+    },
+    {
+      "id": "design-ux-researcher",
+      "label": "Design Ux Researcher",
+      "department": "design",
+      "domain": "design",
+      "file": "design/design-ux-researcher.md",
+      "weight": 1.0,
+      "tags": [
+        "design"
+      ]
+    },
+    {
+      "id": "design-visual-storyteller",
+      "label": "Design Visual Storyteller",
+      "department": "design",
+      "domain": "design",
+      "file": "design/design-visual-storyteller.md",
+      "weight": 1.0,
+      "tags": [
+        "design"
+      ]
+    },
+    {
+      "id": "design-whimsy-injector",
+      "label": "Design Whimsy Injector",
+      "department": "design",
+      "domain": "design",
+      "file": "design/design-whimsy-injector.md",
+      "weight": 1.0,
+      "tags": [
+        "design"
+      ]
+    },
+    {
+      "id": "engineering-ai-data-remediation-engineer",
+      "label": "Engineering Ai Data Remediation Engineer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-ai-data-remediation-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-ai-engineer",
+      "label": "Engineering Ai Engineer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-ai-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-autonomous-optimization-architect",
+      "label": "Engineering Autonomous Optimization Architect",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-autonomous-optimization-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-backend-architect",
+      "label": "Engineering Backend Architect",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-backend-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-cms-developer",
+      "label": "Engineering Cms Developer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-cms-developer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-code-reviewer",
+      "label": "Engineering Code Reviewer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-code-reviewer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-data-engineer",
+      "label": "Engineering Data Engineer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-data-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-database-optimizer",
+      "label": "Engineering Database Optimizer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-database-optimizer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-devops-automator",
+      "label": "Engineering Devops Automator",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-devops-automator.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-email-intelligence-engineer",
+      "label": "Engineering Email Intelligence Engineer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-email-intelligence-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-embedded-firmware-engineer",
+      "label": "Engineering Embedded Firmware Engineer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-embedded-firmware-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-feishu-integration-developer",
+      "label": "Engineering Feishu Integration Developer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-feishu-integration-developer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-filament-optimization-specialist",
+      "label": "Engineering Filament Optimization Specialist",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-filament-optimization-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-frontend-developer",
+      "label": "Engineering Frontend Developer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-frontend-developer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-git-workflow-master",
+      "label": "Engineering Git Workflow Master",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-git-workflow-master.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering",
+        "workflow"
+      ]
+    },
+    {
+      "id": "engineering-incident-response-commander",
+      "label": "Engineering Incident Response Commander",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-incident-response-commander.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-mobile-app-builder",
+      "label": "Engineering Mobile App Builder",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-mobile-app-builder.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-rapid-prototyper",
+      "label": "Engineering Rapid Prototyper",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-rapid-prototyper.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-security-engineer",
+      "label": "Engineering Security Engineer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-security-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-senior-developer",
+      "label": "Engineering Senior Developer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-senior-developer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-software-architect",
+      "label": "Engineering Software Architect",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-software-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-solidity-smart-contract-engineer",
+      "label": "Engineering Solidity Smart Contract Engineer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-solidity-smart-contract-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-sre",
+      "label": "Engineering Sre",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-sre.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-technical-writer",
+      "label": "Engineering Technical Writer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-technical-writer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-threat-detection-engineer",
+      "label": "Engineering Threat Detection Engineer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-threat-detection-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "engineering-wechat-mini-program-developer",
+      "label": "Engineering Wechat Mini Program Developer",
+      "department": "engineering",
+      "domain": "engineering",
+      "file": "engineering/engineering-wechat-mini-program-developer.md",
+      "weight": 1.0,
+      "tags": [
+        "engineering"
+      ]
+    },
+    {
+      "id": "blender-addon-engineer",
+      "label": "Blender Addon Engineer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/blender/blender-addon-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "game-audio-engineer",
+      "label": "Game Audio Engineer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/game-audio-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "game-designer",
+      "label": "Game Designer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/game-designer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "godot-gameplay-scripter",
+      "label": "Godot Gameplay Scripter",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/godot/godot-gameplay-scripter.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "godot-multiplayer-engineer",
+      "label": "Godot Multiplayer Engineer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/godot/godot-multiplayer-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "godot-shader-developer",
+      "label": "Godot Shader Developer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/godot/godot-shader-developer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "level-designer",
+      "label": "Level Designer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/level-designer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "narrative-designer",
+      "label": "Narrative Designer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/narrative-designer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "roblox-avatar-creator",
+      "label": "Roblox Avatar Creator",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/roblox-studio/roblox-avatar-creator.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "roblox-experience-designer",
+      "label": "Roblox Experience Designer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/roblox-studio/roblox-experience-designer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "roblox-systems-scripter",
+      "label": "Roblox Systems Scripter",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/roblox-studio/roblox-systems-scripter.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "technical-artist",
+      "label": "Technical Artist",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/technical-artist.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "unity-architect",
+      "label": "Unity Architect",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/unity/unity-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "unity-editor-tool-developer",
+      "label": "Unity Editor Tool Developer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/unity/unity-editor-tool-developer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "unity-multiplayer-engineer",
+      "label": "Unity Multiplayer Engineer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/unity/unity-multiplayer-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "unity-shader-graph-artist",
+      "label": "Unity Shader Graph Artist",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/unity/unity-shader-graph-artist.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "unreal-multiplayer-architect",
+      "label": "Unreal Multiplayer Architect",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/unreal-engine/unreal-multiplayer-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "unreal-systems-engineer",
+      "label": "Unreal Systems Engineer",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/unreal-engine/unreal-systems-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "unreal-technical-artist",
+      "label": "Unreal Technical Artist",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/unreal-engine/unreal-technical-artist.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "unreal-world-builder",
+      "label": "Unreal World Builder",
+      "department": "game-development",
+      "domain": "game-development",
+      "file": "game-development/unreal-engine/unreal-world-builder.md",
+      "weight": 1.0,
+      "tags": [
+        "game-development"
+      ]
+    },
+    {
+      "id": "marketing-ai-citation-strategist",
+      "label": "Marketing Ai Citation Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-ai-citation-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-app-store-optimizer",
+      "label": "Marketing App Store Optimizer",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-app-store-optimizer.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-baidu-seo-specialist",
+      "label": "Marketing Baidu Seo Specialist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-baidu-seo-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-bilibili-content-strategist",
+      "label": "Marketing Bilibili Content Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-bilibili-content-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-book-co-author",
+      "label": "Marketing Book Co Author",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-book-co-author.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-carousel-growth-engine",
+      "label": "Marketing Carousel Growth Engine",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-carousel-growth-engine.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-china-ecommerce-operator",
+      "label": "Marketing China Ecommerce Operator",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-china-ecommerce-operator.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-china-market-localization-strategist",
+      "label": "Marketing China Market Localization Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-china-market-localization-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-content-creator",
+      "label": "Marketing Content Creator",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-content-creator.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-cross-border-ecommerce",
+      "label": "Marketing Cross Border Ecommerce",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-cross-border-ecommerce.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-douyin-strategist",
+      "label": "Marketing Douyin Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-douyin-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-growth-hacker",
+      "label": "Marketing Growth Hacker",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-growth-hacker.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-instagram-curator",
+      "label": "Marketing Instagram Curator",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-instagram-curator.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-kuaishou-strategist",
+      "label": "Marketing Kuaishou Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-kuaishou-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-linkedin-content-creator",
+      "label": "Marketing Linkedin Content Creator",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-linkedin-content-creator.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-livestream-commerce-coach",
+      "label": "Marketing Livestream Commerce Coach",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-livestream-commerce-coach.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-podcast-strategist",
+      "label": "Marketing Podcast Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-podcast-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-private-domain-operator",
+      "label": "Marketing Private Domain Operator",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-private-domain-operator.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-reddit-community-builder",
+      "label": "Marketing Reddit Community Builder",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-reddit-community-builder.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-seo-specialist",
+      "label": "Marketing Seo Specialist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-seo-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-short-video-editing-coach",
+      "label": "Marketing Short Video Editing Coach",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-short-video-editing-coach.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-social-media-strategist",
+      "label": "Marketing Social Media Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-social-media-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-tiktok-strategist",
+      "label": "Marketing Tiktok Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-tiktok-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-twitter-engager",
+      "label": "Marketing Twitter Engager",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-twitter-engager.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-video-optimization-specialist",
+      "label": "Marketing Video Optimization Specialist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-video-optimization-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-wechat-official-account",
+      "label": "Marketing Wechat Official Account",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-wechat-official-account.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-weibo-strategist",
+      "label": "Marketing Weibo Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-weibo-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-xiaohongshu-specialist",
+      "label": "Marketing Xiaohongshu Specialist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-xiaohongshu-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "marketing-zhihu-strategist",
+      "label": "Marketing Zhihu Strategist",
+      "department": "marketing",
+      "domain": "marketing",
+      "file": "marketing/marketing-zhihu-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "marketing"
+      ]
+    },
+    {
+      "id": "paid-media-auditor",
+      "label": "Paid Media Auditor",
+      "department": "paid-media",
+      "domain": "paid-media",
+      "file": "paid-media/paid-media-auditor.md",
+      "weight": 1.0,
+      "tags": [
+        "paid-media"
+      ]
+    },
+    {
+      "id": "paid-media-creative-strategist",
+      "label": "Paid Media Creative Strategist",
+      "department": "paid-media",
+      "domain": "paid-media",
+      "file": "paid-media/paid-media-creative-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "paid-media"
+      ]
+    },
+    {
+      "id": "paid-media-paid-social-strategist",
+      "label": "Paid Media Paid Social Strategist",
+      "department": "paid-media",
+      "domain": "paid-media",
+      "file": "paid-media/paid-media-paid-social-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "paid-media"
+      ]
+    },
+    {
+      "id": "paid-media-ppc-strategist",
+      "label": "Paid Media Ppc Strategist",
+      "department": "paid-media",
+      "domain": "paid-media",
+      "file": "paid-media/paid-media-ppc-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "paid-media"
+      ]
+    },
+    {
+      "id": "paid-media-programmatic-buyer",
+      "label": "Paid Media Programmatic Buyer",
+      "department": "paid-media",
+      "domain": "paid-media",
+      "file": "paid-media/paid-media-programmatic-buyer.md",
+      "weight": 1.0,
+      "tags": [
+        "paid-media"
+      ]
+    },
+    {
+      "id": "paid-media-search-query-analyst",
+      "label": "Paid Media Search Query Analyst",
+      "department": "paid-media",
+      "domain": "paid-media",
+      "file": "paid-media/paid-media-search-query-analyst.md",
+      "weight": 1.0,
+      "tags": [
+        "paid-media"
+      ]
+    },
+    {
+      "id": "paid-media-tracking-specialist",
+      "label": "Paid Media Tracking Specialist",
+      "department": "paid-media",
+      "domain": "paid-media",
+      "file": "paid-media/paid-media-tracking-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "paid-media"
+      ]
+    },
+    {
+      "id": "product-behavioral-nudge-engine",
+      "label": "Product Behavioral Nudge Engine",
+      "department": "product",
+      "domain": "product",
+      "file": "product/product-behavioral-nudge-engine.md",
+      "weight": 1.0,
+      "tags": [
+        "product"
+      ]
+    },
+    {
+      "id": "product-feedback-synthesizer",
+      "label": "Product Feedback Synthesizer",
+      "department": "product",
+      "domain": "product",
+      "file": "product/product-feedback-synthesizer.md",
+      "weight": 1.0,
+      "tags": [
+        "product"
+      ]
+    },
+    {
+      "id": "product-manager",
+      "label": "Product Manager",
+      "department": "product",
+      "domain": "product",
+      "file": "product/product-manager.md",
+      "weight": 1.0,
+      "tags": [
+        "product"
+      ]
+    },
+    {
+      "id": "product-sprint-prioritizer",
+      "label": "Product Sprint Prioritizer",
+      "department": "product",
+      "domain": "product",
+      "file": "product/product-sprint-prioritizer.md",
+      "weight": 1.0,
+      "tags": [
+        "product"
+      ]
+    },
+    {
+      "id": "product-trend-researcher",
+      "label": "Product Trend Researcher",
+      "department": "product",
+      "domain": "product",
+      "file": "product/product-trend-researcher.md",
+      "weight": 1.0,
+      "tags": [
+        "product"
+      ]
+    },
+    {
+      "id": "project-management-experiment-tracker",
+      "label": "Project Management Experiment Tracker",
+      "department": "project-management",
+      "domain": "project-management",
+      "file": "project-management/project-management-experiment-tracker.md",
+      "weight": 1.0,
+      "tags": [
+        "project-management"
+      ]
+    },
+    {
+      "id": "project-management-jira-workflow-steward",
+      "label": "Project Management Jira Workflow Steward",
+      "department": "project-management",
+      "domain": "project-management",
+      "file": "project-management/project-management-jira-workflow-steward.md",
+      "weight": 1.0,
+      "tags": [
+        "project-management",
+        "workflow"
+      ]
+    },
+    {
+      "id": "project-management-project-shepherd",
+      "label": "Project Management Project Shepherd",
+      "department": "project-management",
+      "domain": "project-management",
+      "file": "project-management/project-management-project-shepherd.md",
+      "weight": 1.0,
+      "tags": [
+        "project-management"
+      ]
+    },
+    {
+      "id": "project-management-studio-operations",
+      "label": "Project Management Studio Operations",
+      "department": "project-management",
+      "domain": "project-management",
+      "file": "project-management/project-management-studio-operations.md",
+      "weight": 1.0,
+      "tags": [
+        "project-management"
+      ]
+    },
+    {
+      "id": "project-management-studio-producer",
+      "label": "Project Management Studio Producer",
+      "department": "project-management",
+      "domain": "project-management",
+      "file": "project-management/project-management-studio-producer.md",
+      "weight": 1.0,
+      "tags": [
+        "project-management"
+      ]
+    },
+    {
+      "id": "project-manager-senior",
+      "label": "Project Manager Senior",
+      "department": "project-management",
+      "domain": "project-management",
+      "file": "project-management/project-manager-senior.md",
+      "weight": 1.0,
+      "tags": [
+        "project-management"
+      ]
+    },
+    {
+      "id": "sales-account-strategist",
+      "label": "Sales Account Strategist",
+      "department": "sales",
+      "domain": "sales",
+      "file": "sales/sales-account-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "sales"
+      ]
+    },
+    {
+      "id": "sales-coach",
+      "label": "Sales Coach",
+      "department": "sales",
+      "domain": "sales",
+      "file": "sales/sales-coach.md",
+      "weight": 1.0,
+      "tags": [
+        "sales"
+      ]
+    },
+    {
+      "id": "sales-deal-strategist",
+      "label": "Sales Deal Strategist",
+      "department": "sales",
+      "domain": "sales",
+      "file": "sales/sales-deal-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "sales"
+      ]
+    },
+    {
+      "id": "sales-discovery-coach",
+      "label": "Sales Discovery Coach",
+      "department": "sales",
+      "domain": "sales",
+      "file": "sales/sales-discovery-coach.md",
+      "weight": 1.0,
+      "tags": [
+        "sales"
+      ]
+    },
+    {
+      "id": "sales-engineer",
+      "label": "Sales Engineer",
+      "department": "sales",
+      "domain": "sales",
+      "file": "sales/sales-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "sales"
+      ]
+    },
+    {
+      "id": "sales-outbound-strategist",
+      "label": "Sales Outbound Strategist",
+      "department": "sales",
+      "domain": "sales",
+      "file": "sales/sales-outbound-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "sales"
+      ]
+    },
+    {
+      "id": "sales-pipeline-analyst",
+      "label": "Sales Pipeline Analyst",
+      "department": "sales",
+      "domain": "sales",
+      "file": "sales/sales-pipeline-analyst.md",
+      "weight": 1.0,
+      "tags": [
+        "sales"
+      ]
+    },
+    {
+      "id": "sales-proposal-strategist",
+      "label": "Sales Proposal Strategist",
+      "department": "sales",
+      "domain": "sales",
+      "file": "sales/sales-proposal-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "sales"
+      ]
+    },
+    {
+      "id": "macos-spatial-metal-engineer",
+      "label": "Macos Spatial Metal Engineer",
+      "department": "spatial-computing",
+      "domain": "spatial-computing",
+      "file": "spatial-computing/macos-spatial-metal-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "spatial-computing"
+      ]
+    },
+    {
+      "id": "terminal-integration-specialist",
+      "label": "Terminal Integration Specialist",
+      "department": "spatial-computing",
+      "domain": "spatial-computing",
+      "file": "spatial-computing/terminal-integration-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "spatial-computing"
+      ]
+    },
+    {
+      "id": "visionos-spatial-engineer",
+      "label": "Visionos Spatial Engineer",
+      "department": "spatial-computing",
+      "domain": "spatial-computing",
+      "file": "spatial-computing/visionos-spatial-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "spatial-computing"
+      ]
+    },
+    {
+      "id": "xr-cockpit-interaction-specialist",
+      "label": "Xr Cockpit Interaction Specialist",
+      "department": "spatial-computing",
+      "domain": "spatial-computing",
+      "file": "spatial-computing/xr-cockpit-interaction-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "spatial-computing"
+      ]
+    },
+    {
+      "id": "xr-immersive-developer",
+      "label": "Xr Immersive Developer",
+      "department": "spatial-computing",
+      "domain": "spatial-computing",
+      "file": "spatial-computing/xr-immersive-developer.md",
+      "weight": 1.0,
+      "tags": [
+        "spatial-computing"
+      ]
+    },
+    {
+      "id": "xr-interface-architect",
+      "label": "Xr Interface Architect",
+      "department": "spatial-computing",
+      "domain": "spatial-computing",
+      "file": "spatial-computing/xr-interface-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "spatial-computing"
+      ]
+    },
+    {
+      "id": "accounts-payable-agent",
+      "label": "Accounts Payable Agent",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/accounts-payable-agent.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "agentic-identity-trust",
+      "label": "Agentic Identity Trust",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/agentic-identity-trust.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "agents-orchestrator",
+      "label": "Agents Orchestrator",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/agents-orchestrator.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "automation-governance-architect",
+      "label": "Automation Governance Architect",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/automation-governance-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "blockchain-security-auditor",
+      "label": "Blockchain Security Auditor",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/blockchain-security-auditor.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "compliance-auditor",
+      "label": "Compliance Auditor",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/compliance-auditor.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "corporate-training-designer",
+      "label": "Corporate Training Designer",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/corporate-training-designer.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "data-consolidation-agent",
+      "label": "Data Consolidation Agent",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/data-consolidation-agent.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "government-digital-presales-consultant",
+      "label": "Government Digital Presales Consultant",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/government-digital-presales-consultant.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "healthcare-marketing-compliance",
+      "label": "Healthcare Marketing Compliance",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/healthcare-marketing-compliance.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "identity-graph-operator",
+      "label": "Identity Graph Operator",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/identity-graph-operator.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "lsp-index-engineer",
+      "label": "Lsp Index Engineer",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/lsp-index-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "recruitment-specialist",
+      "label": "Recruitment Specialist",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/recruitment-specialist.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "report-distribution-agent",
+      "label": "Report Distribution Agent",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/report-distribution-agent.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "sales-data-extraction-agent",
+      "label": "Sales Data Extraction Agent",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/sales-data-extraction-agent.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-civil-engineer",
+      "label": "Specialized Civil Engineer",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-civil-engineer.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-cultural-intelligence-strategist",
+      "label": "Specialized Cultural Intelligence Strategist",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-cultural-intelligence-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-developer-advocate",
+      "label": "Specialized Developer Advocate",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-developer-advocate.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-document-generator",
+      "label": "Specialized Document Generator",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-document-generator.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-french-consulting-market",
+      "label": "Specialized French Consulting Market",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-french-consulting-market.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-korean-business-navigator",
+      "label": "Specialized Korean Business Navigator",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-korean-business-navigator.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-mcp-builder",
+      "label": "Specialized Mcp Builder",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-mcp-builder.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-model-qa",
+      "label": "Specialized Model Qa",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-model-qa.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-salesforce-architect",
+      "label": "Specialized Salesforce Architect",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-salesforce-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "specialized-workflow-architect",
+      "label": "Specialized Workflow Architect",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/specialized-workflow-architect.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized",
+        "workflow"
+      ]
+    },
+    {
+      "id": "study-abroad-advisor",
+      "label": "Study Abroad Advisor",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/study-abroad-advisor.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "supply-chain-strategist",
+      "label": "Supply Chain Strategist",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/supply-chain-strategist.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "zk-steward",
+      "label": "Zk Steward",
+      "department": "specialized",
+      "domain": "specialized",
+      "file": "specialized/zk-steward.md",
+      "weight": 1.0,
+      "tags": [
+        "specialized"
+      ]
+    },
+    {
+      "id": "agent-activation-prompts",
+      "label": "Agent Activation Prompts",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/coordination/agent-activation-prompts.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "handoff-templates",
+      "label": "Handoff Templates",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/coordination/handoff-templates.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "EXECUTIVE-BRIEF",
+      "label": "Executive Brief",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/EXECUTIVE-BRIEF.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "nexus-strategy",
+      "label": "Nexus Strategy",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/nexus-strategy.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "phase-0-discovery",
+      "label": "Phase 0 Discovery",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/playbooks/phase-0-discovery.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "phase-1-strategy",
+      "label": "Phase 1 Strategy",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/playbooks/phase-1-strategy.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "phase-2-foundation",
+      "label": "Phase 2 Foundation",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/playbooks/phase-2-foundation.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "phase-3-build",
+      "label": "Phase 3 Build",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/playbooks/phase-3-build.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "phase-4-hardening",
+      "label": "Phase 4 Hardening",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/playbooks/phase-4-hardening.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "phase-5-launch",
+      "label": "Phase 5 Launch",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/playbooks/phase-5-launch.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "phase-6-operate",
+      "label": "Phase 6 Operate",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/playbooks/phase-6-operate.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "QUICKSTART",
+      "label": "Quickstart",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/QUICKSTART.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "scenario-enterprise-feature",
+      "label": "Scenario Enterprise Feature",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/runbooks/scenario-enterprise-feature.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "scenario-incident-response",
+      "label": "Scenario Incident Response",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/runbooks/scenario-incident-response.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "scenario-marketing-campaign",
+      "label": "Scenario Marketing Campaign",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/runbooks/scenario-marketing-campaign.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "scenario-startup-mvp",
+      "label": "Scenario Startup Mvp",
+      "department": "strategy",
+      "domain": "strategy",
+      "file": "strategy/runbooks/scenario-startup-mvp.md",
+      "weight": 1.0,
+      "tags": [
+        "strategy"
+      ]
+    },
+    {
+      "id": "support-analytics-reporter",
+      "label": "Support Analytics Reporter",
+      "department": "support",
+      "domain": "support",
+      "file": "support/support-analytics-reporter.md",
+      "weight": 1.0,
+      "tags": [
+        "support"
+      ]
+    },
+    {
+      "id": "support-executive-summary-generator",
+      "label": "Support Executive Summary Generator",
+      "department": "support",
+      "domain": "support",
+      "file": "support/support-executive-summary-generator.md",
+      "weight": 1.0,
+      "tags": [
+        "support"
+      ]
+    },
+    {
+      "id": "support-finance-tracker",
+      "label": "Support Finance Tracker",
+      "department": "support",
+      "domain": "support",
+      "file": "support/support-finance-tracker.md",
+      "weight": 1.0,
+      "tags": [
+        "support"
+      ]
+    },
+    {
+      "id": "support-infrastructure-maintainer",
+      "label": "Support Infrastructure Maintainer",
+      "department": "support",
+      "domain": "support",
+      "file": "support/support-infrastructure-maintainer.md",
+      "weight": 1.0,
+      "tags": [
+        "support"
+      ]
+    },
+    {
+      "id": "support-legal-compliance-checker",
+      "label": "Support Legal Compliance Checker",
+      "department": "support",
+      "domain": "support",
+      "file": "support/support-legal-compliance-checker.md",
+      "weight": 1.0,
+      "tags": [
+        "support"
+      ]
+    },
+    {
+      "id": "support-support-responder",
+      "label": "Support Support Responder",
+      "department": "support",
+      "domain": "support",
+      "file": "support/support-support-responder.md",
+      "weight": 1.0,
+      "tags": [
+        "support"
+      ]
+    },
+    {
+      "id": "testing-accessibility-auditor",
+      "label": "Testing Accessibility Auditor",
+      "department": "testing",
+      "domain": "testing",
+      "file": "testing/testing-accessibility-auditor.md",
+      "weight": 1.0,
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "testing-api-tester",
+      "label": "Testing Api Tester",
+      "department": "testing",
+      "domain": "testing",
+      "file": "testing/testing-api-tester.md",
+      "weight": 1.0,
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "testing-evidence-collector",
+      "label": "Testing Evidence Collector",
+      "department": "testing",
+      "domain": "testing",
+      "file": "testing/testing-evidence-collector.md",
+      "weight": 1.0,
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "testing-performance-benchmarker",
+      "label": "Testing Performance Benchmarker",
+      "department": "testing",
+      "domain": "testing",
+      "file": "testing/testing-performance-benchmarker.md",
+      "weight": 1.0,
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "testing-reality-checker",
+      "label": "Testing Reality Checker",
+      "department": "testing",
+      "domain": "testing",
+      "file": "testing/testing-reality-checker.md",
+      "weight": 1.0,
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "testing-test-results-analyzer",
+      "label": "Testing Test Results Analyzer",
+      "department": "testing",
+      "domain": "testing",
+      "file": "testing/testing-test-results-analyzer.md",
+      "weight": 1.0,
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "testing-tool-evaluator",
+      "label": "Testing Tool Evaluator",
+      "department": "testing",
+      "domain": "testing",
+      "file": "testing/testing-tool-evaluator.md",
+      "weight": 1.0,
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "testing-workflow-optimizer",
+      "label": "Testing Workflow Optimizer",
+      "department": "testing",
+      "domain": "testing",
+      "file": "testing/testing-workflow-optimizer.md",
+      "weight": 1.0,
+      "tags": [
+        "testing",
+        "workflow"
+      ]
+    }
+  ],
+  "agent_type_profiles": {
+    "TextExecAgent": [],
+    "VisionExecAgent": [],
+    "SpeechExecAgent": [],
+    "TaskParser": [],
+    "QualityChecker": []
+  }
+}

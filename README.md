@@ -1,8 +1,17 @@
 # ARIA - Autonomous Recursive Intelligent Agent
 
-ARIA is an LLM-powered Autonomous Recursive Intelligent Agent that understands natural language instructions and automatically executes various tasks, including desktop operations, browser automation, WeChat messaging, file processing, and more.
+ARIA is an LLM-powered Autonomous Recursive Intelligent Agent that understands natural language instructions and automatically executes various tasks, including desktop operations, browser automation, messaging-channel delivery, file processing, and more.
 
-## Recent Updates (2026-03-31)
+## Recent Updates (2026-04-03)
+
+- Added **Xiaohongshu (RED) Automation** (`automation/xiaohongshu_driver.py`): Publish image-text posts via web creator center using Playwright; supports title, content, cover image, and topic tags.
+- Added **DeepSeek OCR Adapter** (`automation/deepseek_ocr_adapter.py`): VLM-powered intelligent OCR with context understanding, better accuracy for mixed Chinese-English text, and automatic noise filtering.
+- Added **Execution Retry Policy** (`automation/execution_retry.py`): Smart fallback mechanism for failed tool executions, including fuzzy file path matching and alternative suggestions.
+- Added **Unified App Intent Recognition** (`automation/app_profiles/unified_app_intent.py`): Centralized intent parser for WeChat, WeCom, Xiaohongshu, and other apps; replaces scattered heuristics modules.
+
+## Previous Updates (2026-04-01)
+
+- Added **Computer Use** tools (`computer_*` in `automation/computer_use.py`): screen-coordinate GUI aligned with Claude Computer Use; optional ReAct vision via JSON `react_computer_use_vision` or env `ARIA_REACT_COMPUTER_USE_VISION` (requires a vision-capable `MODEL_NAME`). Audit export: `GET /api/audit_export?conversation_id=...`.
 
 - Implemented **ReAct** execution mode (Thought → Action → Observation loop): enable in the web UI (Settings) or send `react_mode: true` with `/api/process_input`; max steps via `ARIA_REACT_MAX_STEPS` (default 20).
 - Added a clear action risk policy (`safe` / `medium` / `high`) and confirmation behavior.
@@ -12,20 +21,25 @@ ARIA is an LLM-powered Autonomous Recursive Intelligent Agent that understands n
 - Upgraded Experience Center to **Skills Hub** with recommended skills, inline health signals, and one-click reuse.
 - Added hub APIs for aggregation, draft generation from recent successes, import pre-check, and event metrics.
 - Added benchmark strict gate fields (`strict_pass_rate`, `strict_ok`) and CLI threshold checks.
-- Added workspace mode support for product/domain isolation: `aria` and `aria_engineer_autocad`.
-- Added ARIA Engineer (AutoCAD-first) implementation docs under `docs/aria_engineer/`.
+- Workspace mode is simplified to a single `aria` mode; legacy engineer/autocad values are normalized to `aria`.
+- Performance: optional `ARIA_UI_ANIMATION_SLEEP_MS`, smarter LLM retries (`ARIA_LLM_*`), ReAct JPEG quality env, SSE-aware workflow polling; see **Performance tuning** and `scripts/measure_process_input_perf.py`.
+- Added runtime orchestration modules (`runtime/orchestration.py`, `runtime/scheduler.py`) with dependency-aware parallel scheduling (`ARIA_AGENT_MAX_PARALLEL`).
+- Added MCP memory server (`memory/mcp_memory_server.py`) exposing `remember/search/recall/rollback` for cross-session memory workflows.
 
 ## Core Features
 
 - 🤖 **Intelligent Task Parsing**: Automatically analyzes user requirements and breaks them down into executable subtasks
 - 🖥️ **Desktop Automation**: Operates Windows desktop applications (WeChat, WPS, browsers, etc.)
 - 🌐 **Browser Automation**: Real browser operations powered by Playwright
-- 💬 **WeChat Automation**: Supports both desktop client and web version for sending messages
+- 💬 **Messaging Automation**: Channel-based messaging actions (`messaging_*`) with adapter-driven execution (currently WeChat/WeCom)
+- 📱 **Social Media Automation**: Xiaohongshu (RED) post publishing with image upload, title, content, and topic tags
 - 📁 **File Processing**: Automatic file read/write, organization, and Office document parsing
 - 🧠 **Methodology Learning**: Learns from successful tasks and builds a solution repository
+- 🕸️ **Runtime Orchestration**: Dependency-aware multi-agent execution graph with bounded parallel scheduling
+- 🧷 **MCP Memory Service**: FastMCP memory tools (`remember`, `search`, `recall`, `rollback`) for external memory integration
 - 🧩 **Skills Hub**: Turns methodologies into reusable skill cards with recommendation and risk hints
 - 🧪 **Harness Feedback Loop**: Uses benchmark/health signals to drive recommendation confidence
-- 🔍 **OCR Screen Recognition**: Automatically recognizes screen content for intelligent operations
+- 🔍 **OCR Screen Recognition**: Automatically recognizes screen content; supports Tesseract and VLM-powered (DeepSeek/Doubao-vision) intelligent OCR
 - 📊 **Multimodal Support**: Image upload and understanding (requires vision-capable models)
 - 🧱 **CAD Attachment Intake (MVP)**: Supports uploading `dxf`/`dwg`; `dxf` provides lightweight layer/entity summary, `dwg` provides capability hint
 
@@ -52,7 +66,7 @@ ARIA is an LLM-powered Autonomous Recursive Intelligent Agent that understands n
 │  LLM Layer    │  │  Automation   │  │  Memory       │
 │  Volcengine   │  │  - browser_*  │  │  - STM        │
 │  Bailian/Ark  │  │  - desktop_*  │  │  - MTM        │
-│               │  │  - wechat_*   │  │  - LTM        │
+│               │  │  - messaging_*│  │  - LTM        │
 │               │  │  - file_*     │  │  (Methodology)│
 └───────────────┘  └───────────────┘  └───────────────┘
 ```
@@ -94,6 +108,32 @@ python web_app.py
 
 After startup, visit http://localhost:5000 to use the application.
 
+## Performance tuning
+
+Tune behavior with environment variables (see `.env.example`). Typical combinations for lower latency:
+
+| Goal | Suggested knobs |
+|------|-----------------|
+| Less LLM depth | `REASONING_EFFORT_DEFAULT=low` or `minimal`; on DashScope, `ENABLE_THINKING=false` if compatible |
+| Fail faster | `LLM_TIMEOUT_SECONDS=30`–`45` (raise if you see timeouts) |
+| Shorter ReAct loops | `ARIA_REACT_MAX_STEPS=8`–`12` |
+| Smaller vision payloads | Only enable `ARIA_REACT_COMPUTER_USE_VISION` when needed; `ARIA_REACT_COMPUTER_USE_JPEG_MAX=960`–`1280`; `ARIA_REACT_COMPUTER_USE_JPEG_QUALITY=60`–`75` |
+| Less disk / capture work | Turn off `ARIA_ACTION_SCREENSHOT` and the UI “action screenshots” option when not debugging |
+| Skip UI-only delays | Keep `ARIA_UI_ANIMATION_SLEEP_MS=0` (default) |
+| LLM retries | `ARIA_LLM_MAX_RETRIES=2`, `ARIA_LLM_RETRY_SLEEP_BASE_MS=500`, `ARIA_LLM_RETRY_SLEEP_MAX_MS=4000` (retries only on timeouts, connection errors, 429, and 5xx) |
+
+**Baseline metrics:** With `web_app.py` running, record full request time and `token_usage` via:
+
+```bash
+python scripts/measure_process_input_perf.py
+python scripts/measure_process_input_perf.py --react
+python scripts/measure_process_input_perf.py --react --react-vision
+```
+
+Use browser DevTools **Network** timing for **TTFB** on `/api/process_input`. A sample local run is committed under `data/benchmarks/perf_baseline_local_2026-04-01.json` (replace by your own runs as needed).
+
+The web UI stops workflow **polling** while the **SSE** stream is connected and receiving events, and falls back to polling only when the stream errors.
+
 ## Project Structure
 
 ```
@@ -109,15 +149,26 @@ Aria/
 │
 ├── automation/              # Automation execution layer
 │   ├── browser_driver.py    # Browser automation (Playwright)
+│   ├── computer_use.py      # Coordinate-level GUI operations (click/drag/type/screenshot)
 │   ├── desktop_uia.py       # Desktop application automation (pywinauto)
-│   ├── wechat_driver.py     # WeChat automation
+│   ├── wechat_driver.py     # WeChat/WeCom adapter backend for messaging capability
+│   ├── xiaohongshu_driver.py # Xiaohongshu (RED) browser automation for post publishing
+│   ├── messaging_capability.py # Channel-agnostic messaging capability contract + adapter
+│   ├── deepseek_ocr_adapter.py # VLM-powered intelligent OCR (DeepSeek/vision model)
+│   ├── execution_retry.py   # Smart execution retry policy with fuzzy file path fallback
 │   └── screen_ocr.py        # Screen OCR recognition
 │
 ├── llm/                     # LLM inference layer
 │   └── volcengine_llm.py    # Volcengine/Bailian API wrapper
 │
 ├── memory/                  # Memory system
-│   └── memory_system.py     # Short-term/Mid-term/Long-term memory management
+│   ├── memory_system.py     # Short-term/Mid-term/Long-term memory management
+│   └── mcp_memory_server.py # MCP memory server (remember/search/recall/rollback)
+│
+├── runtime/                 # Runtime orchestration layer
+│   ├── orchestration.py     # End-to-end pipeline facade
+│   ├── scheduler.py         # Dependency-aware parallel scheduler
+│   └── execution_graph.py   # Agent execution DAG builder
 │
 ├── templates/               # HTML templates
 │   ├── landing.html         # Landing page
@@ -128,6 +179,11 @@ Aria/
 │   └── locales/             # Internationalization files
 │       ├── en.json
 │       └── zh.json
+│
+├── docs/runtime/            # Runtime operation docs
+│   ├── aria_agent_runbook.md
+│   ├── mcp_memory_integration.md
+│   └── multi_agent_runtime_contract.md
 │
 └── data/                    # Data directory (generated at runtime)
     ├── methodology/         # Methodology library storage
@@ -164,7 +220,7 @@ Core workflow:
 |------------|--------|--------------|-------------|
 | Browser Operations | `browser_*` | Playwright | Open pages, click, type, screenshot, etc. |
 | Desktop Applications | `desktop_*` | pywinauto | Launch apps, window operations, UIA element recognition |
-| WeChat Messaging | `wechat_*` | - | Send messages to contacts/groups (desktop client preferred) |
+| Messaging Channels | `messaging_*` | - | Send messages via channel adapters (current: WeChat/WeCom) |
 | File Operations | `file_*` | - | Read/write files, organize directories, Office document parsing |
 | Screen Recognition | `screen_ocr` | pytesseract | OCR text recognition, screen content understanding |
 
@@ -181,12 +237,16 @@ Core workflow:
 - `REASONING_EFFORT_DEFAULT`: Default reasoning effort level (minimal/low/medium/high)
 - `ARIA_REASONING_ROUTER`: Lightweight model router switch
 - `ARIA_TEMPORAL_METHOD_MATCH_FLOOR`: Temporal task methodology matching threshold (default 0.45)
-- `ARIA_DEFAULT_WORKSPACE_MODE`: Server default workspace mode (`aria` / `aria_engineer_autocad`)
+- `ARIA_DEFAULT_WORKSPACE_MODE`: Server default workspace mode (`aria`)
 - `ARIA_PLAYWRIGHT`: Enable real browser automation (set to 1)
 - `ARIA_DESKTOP_UIA`: Enable desktop shortcuts/input (set to 1)
-- `ARIA_WECHAT_PREFER_DESKTOP`: Prefer desktop WeChat client (set to 1)
+- `ARIA_WECHAT_PREFER_DESKTOP`: Prefer desktop adapter path for WeChat/WeCom (set to 1)
 - `ARIA_ACTION_SCREENSHOT`: Auto full-screen screenshot after actions (set to 1)
 - `ARIA_REACT_MAX_STEPS`: Max ReAct iterations per execution session (default 20)
+- `ARIA_AGENT_MAX_PARALLEL`: Max parallel agents in runtime scheduler (default 2)
+- `ARIA_COMPUTER_USE`: Enable/disable computer-use coordinate actions (`1`/`0`)
+- `ARIA_COMPUTER_USE_ALLOW_REGIONS`: Optional click/drag allowlist regions as JSON `[[left,top,width,height], ...]`
+- `ARIA_COMPUTER_USE_BLOCK_TITLE_KEYWORDS`: Block mutating actions when foreground window title matches keywords
 
 ### Action Risk Policy (safe / medium / high)
 
@@ -244,15 +304,15 @@ The system automatically selects the effort level based on task type, or you can
 
 ## Usage Examples
 
-### Example 1: Send WeChat Message
+### Example 1: Send Message via Channel
 
 User input:
-> Send WeChat message to Zhang San: Meeting tomorrow at 10 AM to discuss project progress
+> Send a message to Zhang San on WeChat: Meeting tomorrow at 10 AM to discuss project progress
 
 ARIA workflow:
-1. Identify intent: Send WeChat message
+1. Identify intent: Send message via channel
 2. Extract information: Recipient=Zhang San, Content=Meeting tomorrow at 10 AM to discuss project progress
-3. Call `wechat_send_message("Zhang San", "Meeting tomorrow at 10 AM to discuss project progress")`
+3. Call `messaging_send(channel="wechat", recipient="Zhang San", content="Meeting tomorrow at 10 AM to discuss project progress")`
 4. Screenshot verification after execution (if configured)
 5. Return execution result
 
@@ -289,13 +349,11 @@ ARIA workflow:
 - `.github/workflows/ci.yml`: lint + type + test + regression benchmark gate
 - `.github/workflows/housekeeping.yml`: weekly drift and quality housekeeping
 
-### ARIA Engineer (AutoCAD First)
+### Runtime Operations Docs
 
-- Boundaries and allowlist: `docs/aria_engineer/01-boundaries-and-allowlist.md`
-- Monorepo migration map: `docs/aria_engineer/02-monorepo-migration-map.md`
-- AutoCAD MVP contracts: `docs/aria_engineer/03-autocad-mvp-contracts.md`
-- Workspace mode UX: `docs/aria_engineer/04-workspace-mode-ux.md`
-- Release gates: `docs/aria_engineer/05-release-gates.md`
+- `docs/runtime/aria_agent_runbook.md`: operations-first runbook for incident/release/perf scenarios
+- `docs/runtime/multi_agent_runtime_contract.md`: multi-agent runtime contract and boundaries
+- `docs/runtime/mcp_memory_integration.md`: MCP memory server integration and usage patterns
 
 ### Adding New Automation Capabilities
 
@@ -375,7 +433,7 @@ python scripts/harness_housekeeping.py --min-strict-pass-rate 0.6
 ## Important Notes
 
 1. **API Key Security**: Do not commit `.env` file to version control
-2. **Windows Dependencies**: Desktop automation and WeChat features are only available on Windows
+2. **Windows Dependencies**: Desktop automation and desktop messaging adapters are only available on Windows
 3. **Browser Driver**: Run `playwright install chromium` to use Playwright
 4. **OCR Accuracy**: pytesseract requires Tesseract-OCR engine installation
 5. **Memory Management**: Consider periodically clearing memory cache for long-running services
@@ -393,6 +451,9 @@ python scripts/harness_housekeeping.py --min-strict-pass-rate 0.6
 
 This project is licensed under the MIT License.
 
+Third-party notices and attributions are documented in `THIRD_PARTY_NOTICES.md`.
+This includes the upstream `agency-agents` assets used for personality catalog integration.
+
 ## Contributing
 
 Issues and Pull Requests are welcome!
@@ -407,4 +468,4 @@ For questions or suggestions, please contact via:
 
 ---
 
-**Last Updated**: 2026-03-31
+**Last Updated**: 2026-04-03

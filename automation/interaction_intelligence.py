@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from automation import browser_driver
+from automation import browser_driver, computer_use
 
 
 @dataclass
@@ -229,4 +229,111 @@ class InteractionIntelligenceCore:
                 "safe_block_reason": "unresolved_target",
                 "decision_trace": trace + [f"fallback_error:{err}"],
             }
+        return None
+
+    # ── Computer Use (pyautogui) fallback for desktop_* ──────────────────────
+
+    def should_try_computer_fallback(
+        self,
+        action_type: str,
+        action: dict[str, Any],
+        result: dict[str, Any],
+    ) -> bool:
+        """desktop_hotkey / desktop_type / desktop_sequence 失败时，降级到 pyautogui。"""
+        if action_type not in ("desktop_hotkey", "desktop_type", "desktop_sequence"):
+            return False
+        if bool(result.get("success")):
+            return False
+        return computer_use.is_computer_use_enabled()
+
+    def try_computer_fallback(
+        self,
+        action_type: str,
+        action: dict[str, Any],
+        previous_result: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """用 pyautogui 重试失败的 desktop_* 动作。"""
+        p = action.get("params") if isinstance(action.get("params"), dict) else {}
+        trace: list[str] = ["uia_path_failed", "computer_use_fallback"]
+
+        if action_type == "desktop_hotkey":
+            hotkey = str(p.get("hotkey") or "").strip()
+            if not hotkey:
+                return None
+            # pywinauto 格式 "ctrl+c" → pyautogui 格式 ["ctrl", "c"]
+            keys = hotkey.lower().replace("{", "").replace("}", "")
+            result = computer_use.run_key({"keys": keys})
+            if result.get("success"):
+                return {
+                    **result,
+                    "strategy_path": "uia_path->computer_use_fallback",
+                    "fallback_used": True,
+                    "confidence": 0.72,
+                    "decision_trace": trace,
+                }
+            return {
+                **dict(previous_result or {}),
+                "strategy_path": "uia_path->computer_use_fallback_failed",
+                "fallback_used": True,
+                "confidence": 0.2,
+                "decision_trace": trace + [f"fallback_error:{result.get('stderr', '')}"],
+            }
+
+        if action_type == "desktop_type":
+            text = str(p.get("text") or p.get("content") or "")
+            if not text:
+                return None
+            result = computer_use.run_type_text({"text": text})
+            if result.get("success"):
+                return {
+                    **result,
+                    "stdout": text[:400],
+                    "strategy_path": "uia_path->computer_use_fallback",
+                    "fallback_used": True,
+                    "confidence": 0.70,
+                    "decision_trace": trace,
+                }
+            return {
+                **dict(previous_result or {}),
+                "strategy_path": "uia_path->computer_use_fallback_failed",
+                "fallback_used": True,
+                "confidence": 0.2,
+                "decision_trace": trace + [f"fallback_error:{result.get('stderr', '')}"],
+            }
+
+        if action_type == "desktop_sequence":
+            # 逐步对每个子步骤尝试 pyautogui，部分成功也返回最终状态
+            steps = p.get("steps") if isinstance(p.get("steps"), list) else []
+            if not steps:
+                return None
+            success_count = 0
+            for step in steps:
+                stype = str(step.get("type") or "").strip()
+                if stype == "hotkey":
+                    keys = str(step.get("hotkey") or "").lower().replace("{", "").replace("}", "")
+                    r = computer_use.run_key({"keys": keys})
+                elif stype == "type":
+                    r = computer_use.run_type_text({"text": str(step.get("text") or "")})
+                elif stype == "sleep":
+                    import time
+                    try:
+                        time.sleep(float(step.get("duration") or 0.5))
+                    except Exception:
+                        pass
+                    r = {"success": True}
+                else:
+                    r = {"success": False, "stderr": f"unsupported_step_type:{stype}"}
+                if r.get("success"):
+                    success_count += 1
+            ok = success_count == len(steps)
+            return {
+                "success": ok,
+                "message": "desktop_sequence_computer_use_fallback",
+                "stdout": f"steps={len(steps)} success={success_count}",
+                "strategy_path": "uia_path->computer_use_fallback",
+                "fallback_used": True,
+                "confidence": 0.65 if ok else 0.3,
+                "decision_trace": trace,
+            }
+
         return None

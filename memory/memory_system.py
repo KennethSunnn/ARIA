@@ -9,22 +9,26 @@ class ShortTermMemory:
         self.task_id = ""
         self.user_input = ""
         self.temporal_risk = "low"  # high：强时效事实（天气/股价等），结论不可照抄旧答案
+        self.execution_surface = "conversation"  # local_desktop / web_research / conversation
         self.current_step = 0
         self.sub_tasks = []
         self.agent_status = {}  # agent_id: status
         self.results = []
         self.logs = []
-    
+        self.tool_trace: list = []  # TAOR 模式工具调用链，供 AutoMemory 分析
+
     def clear(self):
         """任务结束后清空短期记忆"""
         self.task_id = ""
         self.user_input = ""
         self.temporal_risk = "low"
+        self.execution_surface = "conversation"
         self.current_step = 0
         self.sub_tasks = []
         self.agent_status = {}
         self.results = []
         self.logs = []
+        self.tool_trace = []
 
 class MidTermMemory:
     def __init__(self):

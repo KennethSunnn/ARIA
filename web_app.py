@@ -153,24 +153,6 @@ def _empty_token_usage() -> dict:
     return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "llm_calls": 0}
 
 
-def _normalize_workspace_mode(raw: Any) -> str:
-    token = str(raw or "").strip().lower().replace("-", "_")
-    if token in ("aria_engineer", "engineer", "autocad"):
-        return "aria_engineer_autocad"
-    if token in ("aria", "aria_engineer_autocad"):
-        return token
-    env_default = str(os.getenv("ARIA_DEFAULT_WORKSPACE_MODE") or "aria").strip().lower().replace("-", "_")
-    if env_default in ("aria_engineer", "engineer", "autocad"):
-        return "aria_engineer_autocad"
-    return env_default if env_default in ("aria", "aria_engineer_autocad") else "aria"
-
-
-def _workspace_delegate_narrative(mode: str) -> str:
-    if _normalize_workspace_mode(mode) == "aria_engineer_autocad":
-        return "已切换到 ARIA Engineer（AutoCAD）并由工程专家策略处理当前任务。"
-    return ""
-
-
 def _safe_read_json(path: str, default: Any):
     try:
         with open(path, encoding="utf-8") as f:
@@ -368,6 +350,13 @@ def _json_response(data: dict) -> Response:
     return jsonify(payload)
 
 
+def _elapsed_ms_since(started_at_perf: float) -> int:
+    try:
+        return max(0, int((time.perf_counter() - float(started_at_perf)) * 1000))
+    except Exception:
+        return 0
+
+
 def _is_confirmation_text(text: str) -> bool:
     t = (text or "").strip().lower()
     if not t:
@@ -469,6 +458,7 @@ def _finalize_react_execution(
     thread_task_id: str | None = None,
     *,
     action_screenshots: bool = False,
+    react_computer_use_vision: bool = False,
 ):
     """启动 ReAct 异步会话（Thought→Action→Observation 循环）。"""
     session_id = manager.create_react_execution_session(
@@ -481,6 +471,7 @@ def _finalize_react_execution(
         action_screenshots=bool(action_screenshots),
         plan_summary=str(plan_summary or ""),
         plan_risk_level=str(plan_risk_level or "medium"),
+        react_computer_use_vision=bool(react_computer_use_vision),
     )
     execution_sessions_by_conversation[conversation_id] = session_id
     manager.start_execution_session(session_id)
@@ -705,6 +696,13 @@ def app_ui():
 # 处理用户输入
 @app.route("/api/process_input", methods=["POST"])
 def process_input():
+    request_started_at = time.perf_counter()
+
+    def with_elapsed(payload: dict) -> dict:
+        out = dict(payload or {})
+        out["elapsed_ms"] = _elapsed_ms_since(request_started_at)
+        return out
+
     is_multipart = bool(request.content_type and "multipart/form-data" in request.content_type.lower())
     attachments_json_payload: Any = None
     upload_files: list = []
@@ -730,7 +728,7 @@ def process_input():
             "task_id": client_tid_mp,
             "reasoning_effort": (form.get("reasoning_effort") or "").strip() or None,
             "react_mode": react_mode_mp,
-            "workspace_mode": _normalize_workspace_mode(form.get("workspace_mode")),
+            "react_computer_use_vision": str(form.get("react_computer_use_vision") or "").lower() in ("1", "true", "yes", "on"),
         }
     else:
         data = request.get_json(silent=True)
@@ -782,9 +780,7 @@ def process_input():
 
     manager.set_conversation_context(conversation_id)
     manager.current_request_id = request_id or ""
-    workspace_mode = _normalize_workspace_mode((payload_early or {}).get("workspace_mode"))
-    manager.set_workspace_mode(workspace_mode)
-    delegation_narrative = _workspace_delegate_narrative(workspace_mode)
+    manager.set_workspace_mode("aria")
 
     # 检查是否已配置 API Key（方舟：ARK_API_KEY；百炼：DASHSCOPE_API_KEY，见 resolve_inference_api_key）
     api_key = resolve_api_key()
@@ -824,18 +820,18 @@ def process_input():
         )
         manager.set_conversation_context("")
         return jsonify(
-            {
-                "result": mock_reply,
-                "logs": logs,
-                "workflow_events": [],
-                "conversation_id": conversation_id,
-                "api_key_configured": False,
-                "task_id": "",
-                "request_id": request_id or "",
-                "workspace_mode": workspace_mode,
-                "delegation_narrative": delegation_narrative,
-                "token_usage": _empty_token_usage(),
-            }
+            with_elapsed(
+                {
+                    "result": mock_reply,
+                    "logs": logs,
+                    "workflow_events": [],
+                    "conversation_id": conversation_id,
+                    "api_key_configured": False,
+                    "task_id": "",
+                    "request_id": request_id or "",
+                    "token_usage": _empty_token_usage(),
+                }
+            )
         )
 
     agents = {}
@@ -846,7 +842,7 @@ def process_input():
         client_task_id = str(payload.get("task_id") or "").strip()
         _rm = payload.get("react_mode") if isinstance(payload, dict) else None
         react_mode = _rm is True or (isinstance(_rm, str) and _rm.strip().lower() in ("1", "true", "yes", "on"))
-        workspace_mode = manager.set_workspace_mode(payload.get("workspace_mode"))
+        manager.set_workspace_mode("aria")
         dialogue_context = conversation_manager.format_dialogue_context_for_prompt(conversation_id)
         reuse_for_parse = _reuse_task_id_for_parse(
             conversation_id, client_task_id, new_task, conversation_task_bookmark
@@ -857,15 +853,6 @@ def process_input():
         manager.clear_execution_log()
         manager.clear_workflow_events()
         manager.reset_token_usage()
-        if workspace_mode == "aria_engineer_autocad":
-            manager.push_event(
-                "workspace_delegate_narrative",
-                "success",
-                "TaskParser",
-                "已切换工程专家策略（ARIA Engineer / AutoCAD）",
-                {"workspace_mode": workspace_mode},
-            )
-            manager.push_log("TaskParser", "委派叙事：已切换工程专家处理当前任务", "completed")
         manager.set_turn_vision_images(image_data_urls_from_attachment_records(manager, attachment_records))
         attachment_exts = [str(r.get("ext") or "").lower() for r in attachment_records]
         client_re = payload.get("reasoning_effort") if isinstance(payload, dict) else None
@@ -921,27 +908,28 @@ def process_input():
                     )
                     conversation_manager.replace_workflow_events(conversation_id, workflow_events)
                     return _json_response(
-                        {
-                            "result": msg,
-                            "logs": logs,
-                            "workflow_events": workflow_events,
-                            "conversation_id": conversation_id,
-                            "api_key_configured": True,
-                            "task_id": tid,
-                            "request_id": request_id or "",
-                            "pending_actions": {"actions": actions, "requires_double_confirmation": True},
-                            "needs_confirmation": True,
-                            "needs_double_confirmation": True,
-                            "model_trace": getattr(manager, "last_model_trace", {}),
-                            "workspace_mode": workspace_mode,
-                            "delegation_narrative": delegation_narrative,
-                            "token_usage": _tu,
-                        }
+                        with_elapsed(
+                            {
+                                "result": msg,
+                                "logs": logs,
+                                "workflow_events": workflow_events,
+                                "conversation_id": conversation_id,
+                                "api_key_configured": True,
+                                "task_id": tid,
+                                "request_id": request_id or "",
+                                "pending_actions": {"actions": actions, "requires_double_confirmation": True},
+                                "needs_confirmation": True,
+                                "needs_double_confirmation": True,
+                                "model_trace": getattr(manager, "last_model_trace", {}),
+                                "token_usage": _tu,
+                            }
+                        )
                     )
                 pending_action_plans.pop(conversation_id, None)
                 if pending.get("react_mode"):
                     return jsonify(
-                        _finalize_react_execution(
+                        with_elapsed(
+                            _finalize_react_execution(
                             conversation_id,
                             request_id or "",
                             str(pending.get("user_goal") or ""),
@@ -950,10 +938,12 @@ def process_input():
                             plan_risk_level=str(pending.get("risk_level") or "medium"),
                             thread_task_id=tid,
                             action_screenshots=action_screenshots,
+                            )
                         )
                     )
                 return jsonify(
-                    _finalize_action_execution(
+                    with_elapsed(
+                        _finalize_action_execution(
                         conversation_id,
                         request_id or "",
                         actions,
@@ -961,6 +951,7 @@ def process_input():
                         plan_risk_level=str(pending.get("risk_level") or "medium"),
                         thread_task_id=tid,
                         action_screenshots=action_screenshots,
+                        )
                     )
                 )
 
@@ -969,13 +960,9 @@ def process_input():
                 _is_double_confirmation_text(user_input or "")
                 and pending_action_plans.get(conversation_id, {}).get("double_confirm_ready")
             ):
-                if manager.should_invalidate_pending_for_new_wechat_turn(llm_user_input or "", dialogue_context):
-                    pending_action_plans.pop(conversation_id, None)
+                pending_action_plans.pop(conversation_id, None)
 
         plan = manager.plan_actions(llm_user_input or "", dialogue_context)
-        wx_sup = manager.supplement_wechat_plan_if_applicable(llm_user_input or "", dialogue_context, plan)
-        if wx_sup:
-            plan = wx_sup
         if plan.get("mode") == "clarify":
             tid = _tid_for_response_non_parse(conversation_id, client_task_id, new_task, conversation_task_bookmark)
             manager.current_task_id = tid
@@ -1003,26 +990,33 @@ def process_input():
             cc = plan.get("choices") if isinstance(plan.get("choices"), list) else []
             clarify_choices = [c for c in cc if isinstance(c, dict) and str(c.get("id") or "").strip()]
             return _json_response(
-                {
-                    "result": clarify_text,
-                    "logs": logs,
-                    "workflow_events": workflow_events,
-                    "conversation_id": conversation_id,
-                    "api_key_configured": True,
-                    "task_id": tid,
-                    "request_id": request_id or "",
-                    "needs_confirmation": False,
-                    "needs_clarify": True,
-                    "clarify_choices": clarify_choices,
-                    "model_trace": getattr(manager, "last_model_trace", {}),
-                    "workspace_mode": workspace_mode,
-                    "delegation_narrative": delegation_narrative,
-                    "token_usage": _tu,
-                }
+                with_elapsed(
+                    {
+                        "result": clarify_text,
+                        "logs": logs,
+                        "workflow_events": workflow_events,
+                        "conversation_id": conversation_id,
+                        "api_key_configured": True,
+                        "task_id": tid,
+                        "request_id": request_id or "",
+                        "needs_confirmation": False,
+                        "needs_clarify": True,
+                        "clarify_choices": clarify_choices,
+                        "model_trace": getattr(manager, "last_model_trace", {}),
+                        "token_usage": _tu,
+                    }
+                )
             )
         if plan.get("mode") == "action" and (plan.get("actions") or react_mode):
             tid = _tid_for_response_non_parse(conversation_id, client_task_id, new_task, conversation_task_bookmark)
             manager.current_task_id = tid
+            # 若计划包含 computer_screenshot，自动升级为 ReAct 模式（截图需要视觉反馈循环）
+            _plan_actions = plan.get("actions") or []
+            _computer_use_types = {"computer_screenshot", "computer_click", "computer_double_click",
+                                   "computer_type", "computer_key", "computer_drag", "computer_scroll"}
+            if not react_mode and any(a.get("type") in _computer_use_types for a in _plan_actions):
+                react_mode = True
+                payload["react_computer_use_vision"] = True
             plan_risk_level = manager.evaluate_action_risk_level(plan.get("actions") or [])
             if react_mode and plan_risk_level == "safe":
                 plan_risk_level = "medium"
@@ -1041,7 +1035,7 @@ def process_input():
                 )
                 started_payload["needs_confirmation"] = False
                 started_payload["auto_executed"] = True
-                return jsonify(started_payload)
+                return jsonify(with_elapsed(started_payload))
             pending_action_plans[conversation_id] = {
                 "actions": plan.get("actions") or [],
                 "summary": plan.get("summary", ""),
@@ -1049,6 +1043,15 @@ def process_input():
                 "created_at": time.time(),
                 "double_confirm_ready": False,
                 "react_mode": bool(react_mode),
+                "react_computer_use_vision": (
+                    (payload.get("react_computer_use_vision") is True)
+                    or (
+                        isinstance(payload.get("react_computer_use_vision"), str)
+                        and payload.get("react_computer_use_vision", "").strip().lower() in ("1", "true", "yes", "on")
+                    )
+                )
+                if isinstance(payload, dict)
+                else False,
                 "user_goal": llm_user_input or "",
                 "dialogue_context": dialogue_context,
             }
@@ -1080,30 +1083,28 @@ def process_input():
                     "token_usage": _tu,
                     "task_id": tid,
                     "react_mode": bool(react_mode),
-                    "workspace_mode": workspace_mode,
-                    "delegation_narrative": delegation_narrative,
                 },
             )
             conversation_manager.replace_workflow_events(conversation_id, workflow_events)
             return _json_response(
-                {
-                    "result": preview_text,
-                    "logs": logs,
-                    "workflow_events": workflow_events,
-                    "conversation_id": conversation_id,
-                    "api_key_configured": True,
-                    "task_id": tid,
-                    "request_id": request_id or "",
-                    "pending_actions": plan,
-                    "needs_confirmation": True,
-                    "needs_double_confirmation": bool(plan.get("requires_double_confirmation")),
-                    "risk_level": plan_risk_level,
-                    "react_mode": bool(react_mode),
-                    "workspace_mode": workspace_mode,
-                    "delegation_narrative": delegation_narrative,
-                    "model_trace": getattr(manager, "last_model_trace", {}),
-                    "token_usage": _tu,
-                }
+                with_elapsed(
+                    {
+                        "result": preview_text,
+                        "logs": logs,
+                        "workflow_events": workflow_events,
+                        "conversation_id": conversation_id,
+                        "api_key_configured": True,
+                        "task_id": tid,
+                        "request_id": request_id or "",
+                        "pending_actions": plan,
+                        "needs_confirmation": True,
+                        "needs_double_confirmation": bool(plan.get("requires_double_confirmation")),
+                        "risk_level": plan_risk_level,
+                        "react_mode": bool(react_mode),
+                        "model_trace": getattr(manager, "last_model_trace", {}),
+                        "token_usage": _tu,
+                    }
+                )
             )
 
         route = manager.classify_interaction_mode(llm_user_input or "")
@@ -1132,19 +1133,51 @@ def process_input():
             )
             conversation_manager.replace_workflow_events(conversation_id, workflow_events)
             return _json_response(
-                {
-                    "result": final_result,
-                    "logs": logs,
-                    "workflow_events": workflow_events,
-                    "conversation_id": conversation_id,
-                    "api_key_configured": True,
-                    "task_id": st_tid,
-                    "request_id": request_id or "",
-                    "workspace_mode": workspace_mode,
-                    "delegation_narrative": delegation_narrative,
-                    "model_trace": getattr(manager, "last_model_trace", {}),
-                    "token_usage": _tu,
-                }
+                with_elapsed(
+                    {
+                        "result": final_result,
+                        "logs": logs,
+                        "workflow_events": workflow_events,
+                        "conversation_id": conversation_id,
+                        "api_key_configured": True,
+                        "task_id": st_tid,
+                        "request_id": request_id or "",
+                        "model_trace": getattr(manager, "last_model_trace", {}),
+                        "token_usage": _tu,
+                    }
+                )
+            )
+
+        # TAOR 模式：特性标志 ARIA_TAOR_MODE=1 时启用自主执行循环，跳过 7 步瀑布流
+        import os as _os
+        if _os.getenv("ARIA_TAOR_MODE", "0").strip().lower() in ("1", "true", "yes"):
+            taor_result = manager.run_taor_pipeline(
+                user_input=llm_user_input or "",
+                dialogue_context=dialogue_context,
+                conversation_id=conversation_id,
+            )
+            final_result = taor_result.get("final_result", "")
+            logs = manager.get_execution_log()
+            workflow_events = manager.get_workflow_events()
+            _tu = manager.get_token_usage_summary()
+            conversation_manager.append_message(
+                conversation_id,
+                "assistant",
+                final_result,
+                {"logs": logs, "workflow_events": workflow_events, "token_usage": _tu},
+            )
+            conversation_manager.replace_workflow_events(conversation_id, workflow_events)
+            return _json_response(
+                with_elapsed(
+                    {
+                        "result": final_result,
+                        "logs": logs,
+                        "workflow_events": workflow_events,
+                        "token_usage": _tu,
+                        "taor_mode": True,
+                        "tool_trace": taor_result.get("tool_trace", []),
+                    }
+                )
             )
 
         task_info = manager.parse_task(llm_user_input or "", dialogue_context, reuse_for_parse)
@@ -1190,17 +1223,10 @@ def process_input():
             else:
                 method = manager.learn_from_external(task_info)
 
-        # 拆分子任务
-        sub_tasks = manager.split_sub_tasks(task_info, method)
-
-        # 生成Agent
-        agents = manager.create_agents(sub_tasks)
-
-        # 执行Agent
-        results = manager.run_agents(agents, method, dialogue_context)
-
-        # 校验结果
-        check_payload = manager.check_result(results)
+        # 多 Agent 编排（runtime facade）
+        orchestration_payload = manager.orchestration.execute_pipeline(task_info, method, dialogue_context)
+        agents = orchestration_payload.get("agents", {})
+        check_payload = orchestration_payload.get("check_payload", {})
         final_result = check_payload.get("final_result") if isinstance(check_payload, dict) else check_payload
 
         # 保存方法论
@@ -1222,17 +1248,19 @@ def process_input():
         conversation_manager.replace_workflow_events(conversation_id, workflow_events)
 
         return _json_response(
-            {
-                "result": final_result,
-                "logs": logs,
-                "workflow_events": workflow_events,
-                "conversation_id": conversation_id,
-                "api_key_configured": True,
-                "task_id": current_task_id,
-                "request_id": request_id or "",
-                "model_trace": getattr(manager, "last_model_trace", {}),
-                "token_usage": _tu,
-            }
+            with_elapsed(
+                {
+                    "result": final_result,
+                    "logs": logs,
+                    "workflow_events": workflow_events,
+                    "conversation_id": conversation_id,
+                    "api_key_configured": True,
+                    "task_id": current_task_id,
+                    "request_id": request_id or "",
+                    "model_trace": getattr(manager, "last_model_trace", {}),
+                    "token_usage": _tu,
+                }
+            )
         )
     except TaskCancelledError:
         cancelled_text = "任务已中止。你可以调整问题后重新发起。"
@@ -1250,17 +1278,19 @@ def process_input():
         )
         conversation_manager.replace_workflow_events(conversation_id, workflow_events)
         return _json_response(
-            {
-                "result": cancelled_text,
-                "logs": logs,
-                "workflow_events": workflow_events,
-                "conversation_id": conversation_id,
-                "api_key_configured": True,
-                "task_id": cx_tid,
-                "request_id": request_id or "",
-                "cancelled": True,
-                "token_usage": _tu,
-            }
+            with_elapsed(
+                {
+                    "result": cancelled_text,
+                    "logs": logs,
+                    "workflow_events": workflow_events,
+                    "conversation_id": conversation_id,
+                    "api_key_configured": True,
+                    "task_id": cx_tid,
+                    "request_id": request_id or "",
+                    "cancelled": True,
+                    "token_usage": _tu,
+                }
+            )
         )
     except Exception as e:
         err = f"执行错误: {str(e)}"
@@ -1275,16 +1305,18 @@ def process_input():
             {"logs": [], "workflow_events": [], "token_usage": _tu, "task_id": ex_tid},
         )
         return _json_response(
-            {
-                "result": err,
-                "logs": [],
-                "workflow_events": [],
-                "conversation_id": conversation_id,
-                "api_key_configured": True,
-                "task_id": ex_tid,
-                "request_id": request_id or "",
-                "token_usage": _tu,
-            }
+            with_elapsed(
+                {
+                    "result": err,
+                    "logs": [],
+                    "workflow_events": [],
+                    "conversation_id": conversation_id,
+                    "api_key_configured": True,
+                    "task_id": ex_tid,
+                    "request_id": request_id or "",
+                    "token_usage": _tu,
+                }
+            )
         )
     finally:
         if agents:
@@ -1347,6 +1379,7 @@ def confirm_actions():
             plan_risk_level=risk_level,
             thread_task_id=btid or None,
             action_screenshots=action_screenshots,
+            react_computer_use_vision=bool(pending.get("react_computer_use_vision")),
         )
     else:
         payload = _finalize_action_execution(
@@ -1467,6 +1500,24 @@ def get_workflow_events():
         convo = conversation_manager.get_conversation(conversation_id) or {}
         return jsonify({"workflow_events": convo.get("workflow_events", [])})
     return jsonify({"workflow_events": manager.get_workflow_events()})
+
+
+@app.route("/api/audit_export")
+def audit_export():
+    """导出本会话的结构化 workflow_events（JSON），供审计；不含密钥。"""
+    conversation_id = (request.args.get("conversation_id") or "").strip()
+    if not conversation_id:
+        return jsonify({"success": False, "message": "missing conversation_id"}), 400
+    convo = conversation_manager.get_conversation(conversation_id) or {}
+    events = convo.get("workflow_events") or []
+    return jsonify(
+        {
+            "success": True,
+            "conversation_id": conversation_id,
+            "exported_at": time.time(),
+            "workflow_events": events,
+        }
+    )
 
 
 @app.route("/api/workflow_stream")
@@ -1816,6 +1867,56 @@ def get_memory_status():
         },
     }
     return jsonify({"memory_status": memory_status})
+
+
+# 应用管理 API（新框架）
+@app.route("/api/applications")
+def list_applications():
+    """列出所有已注册的应用插件。"""
+    apps = manager.app_registry.list_apps()
+    result = []
+    for app in apps:
+        result.append({
+            "app_id": app.app_id,
+            "app_name": app.app_name,
+            "capabilities_count": len(app.capabilities),
+        })
+    return jsonify({"success": True, "applications": result})
+
+
+@app.route("/api/applications/<app_id>/capabilities")
+def get_application_capabilities(app_id):
+    """获取指定应用的能力列表。"""
+    app = manager.app_registry.get_app(app_id)
+    if not app:
+        return jsonify({"success": False, "message": f"应用 {app_id} 不存在"}), 404
+
+    capabilities = []
+    for cap in app.capabilities:
+        capabilities.append({
+            "action_type": cap.action_type,
+            "display_name": cap.display_name,
+            "description": cap.description,
+            "risk_level": cap.risk_level,
+            "requires_confirmation": cap.requires_confirmation,
+            "parameters": [
+                {
+                    "name": p.name,
+                    "display_name": p.display_name,
+                    "param_type": p.param_type,
+                    "required": p.required,
+                    "description": p.description,
+                }
+                for p in cap.parameters
+            ],
+        })
+
+    return jsonify({
+        "success": True,
+        "app_id": app.app_id,
+        "app_name": app.app_name,
+        "capabilities": capabilities,
+    })
 
 
 if __name__ == "__main__":

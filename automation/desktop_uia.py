@@ -127,7 +127,7 @@ def capability_summary_for_planner() -> str:
     if not is_uia_enabled():
         return (
             "【桌面 UI 自动化】未启用（未设置 ARIA_DESKTOP_UIA=1）。desktop_hotkey / desktop_type 为模拟占位，不向系统注入快捷键或文本。"
-            "用户要通过微信/企业微信发消息时，应使用 wechat_send_message 等专用动作（由用户确认后执行），勿用 desktop_type/desktop_hotkey 冒充已发送；"
+            "用户要通过消息通道（微信/企微）发消息时，应使用 messaging_send 等专用动作（由用户确认后执行），勿用 desktop_type/desktop_hotkey 冒充已发送；"
             "勿承诺未启用的 desktop_* 真实注入。"
         )
     if os.name != "nt":

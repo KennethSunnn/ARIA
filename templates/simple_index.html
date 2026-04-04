@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title data-i18n="app.title">ARIA</title>
-    <link rel="icon" type="image/png" href="/static/img/aria-avatar.png">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/aria-avatar.png') }}">
     <!-- Bootstrap CSS -->
+    <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Font Awesome -->
+    <link href="{{ url_for('static', filename='vendor/font-awesome/css/font-awesome.min.css') }}" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
     <style>
         :root {
@@ -36,11 +38,6 @@
             font-family: 'SourceHanSans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             color: var(--text);
         }
-        body.workspace-mode-engineer {
-            --primary: #0f766e;
-            --primary-soft: rgba(15, 118, 110, 0.12);
-            --focus-ring: 0 0 0 3px rgba(15, 118, 110, 0.22);
-        }
         .top-nav {
             position: sticky;
             top: 0;
@@ -59,15 +56,6 @@
         }
         .tab-content {
             margin-top: 20px;
-        }
-        #workspace-mode-banner {
-            margin: 10px 16px 0;
-            padding: 8px 12px;
-            border-radius: 10px;
-            border: 1px solid rgba(15, 118, 110, 0.28);
-            background: rgba(15, 118, 110, 0.08);
-            color: #0f766e;
-            font-size: 13px;
         }
         #main-tab-content {
             display: flex;
@@ -454,6 +442,33 @@
         .ai-typing-indicator {
             color: var(--muted);
             font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            position: relative;
+            overflow: hidden;
+            padding: 2px 0;
+        }
+        .ai-typing-indicator::after {
+            content: "";
+            position: absolute;
+            left: -45%;
+            top: 0;
+            width: 40%;
+            height: 100%;
+            background: linear-gradient(90deg, rgba(59,130,246,0), rgba(59,130,246,0.22), rgba(59,130,246,0));
+            animation: ariaThinkingSweep 1.4s ease-in-out infinite;
+            pointer-events: none;
+        }
+        .ai-typing-indicator .thinking-icon {
+            color: #3b82f6;
+            font-size: 12px;
+            animation: ariaThinkingPulse 1.1s ease-in-out infinite;
+            transform-origin: center;
+        }
+        .ai-typing-indicator .thinking-text {
+            font-weight: 500;
+            letter-spacing: 0.1px;
         }
         .ai-typing-indicator .dot {
             display: inline-block;
@@ -461,9 +476,25 @@
         }
         .ai-typing-indicator .dot:nth-child(2) { animation-delay: 0.15s; }
         .ai-typing-indicator .dot:nth-child(3) { animation-delay: 0.3s; }
+        .ai-typing-indicator .dot:nth-child(4) { animation-delay: 0.45s; }
         @keyframes ariaTypingDot {
             0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
-            40% { opacity: 1; transform: translateY(-1px); }
+            40% { opacity: 1; transform: translateY(-2px); }
+        }
+        @keyframes ariaThinkingPulse {
+            0%, 100% { transform: scale(0.92); opacity: 0.75; }
+            50% { transform: scale(1.08); opacity: 1; }
+        }
+        @keyframes ariaThinkingSweep {
+            0% { left: -45%; }
+            100% { left: 120%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .ai-typing-indicator::after,
+            .ai-typing-indicator .thinking-icon,
+            .ai-typing-indicator .dot {
+                animation: none !important;
+            }
         }
         .chat-composer-send {
             flex-shrink: 0;
@@ -800,12 +831,6 @@
             background: var(--primary-soft);
             border: 1px solid rgba(37, 99, 235, 0.16);
         }
-        #workspace-mode-badge {
-            max-width: min(72vw, 340px);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
         button,
         .btn,
         .form-control,
@@ -1137,9 +1162,6 @@
                 justify-content: flex-start !important;
                 flex-wrap: wrap;
             }
-            #workspace-mode-badge {
-                max-width: 100%;
-            }
         }
     </style>
 </head>
@@ -1151,7 +1173,7 @@
                 <div class="col-md-6">
                     <div class="d-flex align-items-center">
                         <div class="aria-brand-mark me-3">
-                            <img src="/static/img/aria-avatar.png" width="40" height="40" alt="ARIA">
+                            <img src="{{ url_for('static', filename='img/aria-avatar.png') }}" width="40" height="40" alt="ARIA" onerror="this.style.display='none'">
                         </div>
                         <div>
                             <h1 class="h4 mb-0 font-weight-bold">Aria</h1>
@@ -1162,16 +1184,11 @@
                     <div class="d-inline-flex align-items-center justify-content-md-end gap-2 workspace-meta">
                         <div data-lang-switcher></div>
                         <span class="app-badge"><i class="fa fa-magic" style="margin-right:6px;"></i> ARIA v2</span>
-                        <span class="app-badge" id="workspace-mode-badge">Workspace: ARIA</span>
                     </div>
                 </div>
             </div>
         </div>
     </nav>
-    <div id="workspace-mode-banner" class="d-none">
-        Engineering mode is active. CAD-safe tool allowlist is enforced.
-    </div>
-
     <!-- 标签页导航 -->
     <div class="tab-nav">
         <div class="container-fluid">
@@ -1237,7 +1254,7 @@
                                 <button type="button" class="btn btn-link btn-sm p-0 ms-2 align-baseline" id="chat-welcome-show-btn" data-i18n="app.chat.welcomeShowTips">Show tips</button>
                             </div>
                             <div class="chat-welcome text-center" id="chat-empty-hint">
-                                <div class="chat-welcome-avatar" aria-hidden="true"><img src="/static/img/aria-avatar.png" width="56" height="56" alt=""></div>
+                                <div class="chat-welcome-avatar" aria-hidden="true"><img src="{{ url_for('static', filename='img/aria-avatar.png') }}" width="56" height="56" alt="" onerror="this.style.display='none'"></div>
                                 <div class="welcome-title" data-i18n="app.chat.welcomeTitle">Hi, I'm ARIA</div>
                                 <p class="welcome-lead mb-0" data-i18n="app.chat.welcomeLead">Ask in plain language — I'll plan, execute, and learn from experience.</p>
                                 <ul class="text-start mx-auto mt-3" style="max-width:300px;">
@@ -1480,14 +1497,6 @@
                             </label>
                         </div>
                         <p class="text-muted small mt-2 mb-0" data-i18n="app.settings.reactModeHint">Uses more LLM calls; cap iterations with ARIA_REACT_MAX_STEPS in .env.</p>
-                        <div class="mt-3">
-                            <label class="form-label mb-1" for="aria-workspace-mode" data-i18n="app.settings.workspaceModeTitle">Workspace Mode</label>
-                            <select class="form-select form-select-sm" id="aria-workspace-mode">
-                                <option value="aria" data-i18n="app.workspaceMode.aria">ARIA (General Assistant)</option>
-                                <option value="aria_engineer_autocad" data-i18n="app.workspaceMode.engineerAutocad">ARIA Engineer (AutoCAD)</option>
-                            </select>
-                            <p class="text-muted small mt-2 mb-0" data-i18n="app.settings.workspaceModeHint">Switching mode changes tool allowlist and planning behavior. ARIA Engineer blocks social/messaging actions by default.</p>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -1497,13 +1506,19 @@
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/js/i18n.js"></script>
+    <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        if (!window.bootstrap) {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"><\\/script>');
+        }
+    </script>
+    <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
     <script>
         $(document).ready(async function() {
             await window.ariaI18n.init();
             const tr = (k, fb = '') => (window.ariaI18n ? window.ariaI18n.t(k, fb) : (fb || k));
             const tf = (k, vars = {}, fb = '') => (window.ariaI18n ? window.ariaI18n.format(tr(k, fb), vars) : (fb || k));
+            const avatarSrc = "{{ url_for('static', filename='img/aria-avatar.png') }}";
             const WELCOME_MIN_STORAGE = 'aria_chat_welcome_min';
             function applyChatWelcomeVisibility() {
                 const $full = $('#chat-empty-hint');
@@ -1531,7 +1546,6 @@
             window.addEventListener('aria:localeChanged', function() {
                 applyChatWelcomeVisibility();
                 if (window.ariaI18n) window.ariaI18n.apply(document.querySelector('#panel-card-center'));
-                renderWorkspaceModeBadge(getWorkspaceMode());
             });
             function formatTokenUsageLine(tu) {
                 if (!tu) return '';
@@ -1544,12 +1558,36 @@
                 return tf('app.tokenUsage.line', { prompt: p, completion: c, total: total, calls: n },
                     `Token: prompt ${p}, completion ${c}, total ${total}, ${n} LLM call(s)`);
             }
+            function formatElapsedLine(elapsedMs) {
+                const ms = Number(elapsedMs);
+                if (!Number.isFinite(ms) || ms < 0) return '';
+                if (ms < 1000) return `用时 ${Math.round(ms)} ms`;
+                const sec = ms / 1000;
+                if (sec < 60) return `用时 ${sec.toFixed(2)} s`;
+                const min = Math.floor(sec / 60);
+                const rem = sec - (min * 60);
+                return `用时 ${min}m ${rem.toFixed(1)}s`;
+            }
             function appendTokenUsageToAiMessage($msgEl, tu) {
                 if (!$msgEl || !$msgEl.length) return;
                 const line = formatTokenUsageLine(tu);
                 if (!line) return;
                 $msgEl.find('.token-usage-note').remove();
                 $msgEl.append(`<div class="token-usage-note text-muted mt-1" style="font-size:12px;">${escapeHtml(line)}</div>`);
+            }
+            function appendElapsedToAiMessage($msgEl, elapsedMs) {
+                if (!$msgEl || !$msgEl.length) return;
+                const line = formatElapsedLine(elapsedMs);
+                if (!line) return;
+                $msgEl.find('.elapsed-note').remove();
+                $msgEl.append(`<div class="elapsed-note text-muted mt-1" style="font-size:12px;">${escapeHtml(line)}</div>`);
+            }
+            function resolveThinkingPhases() {
+                return [
+                    tr('app.request.phase.parse', 'Understanding your request'),
+                    tr('app.request.phase.plan', 'Planning execution steps'),
+                    tr('app.request.phase.compose', 'Composing response'),
+                ];
             }
             let currentConversationId = null;
             let workflowPollTimer = null;
@@ -1583,6 +1621,8 @@
             let lastCompletedExecutionTokenUsage = null;
             let loadConversationsTimer = null;
             let workflowStreamScheduleTimer = null;
+            let thinkingPhaseTimer = null;
+            let thinkingPhaseIndex = 0;
             let autoFocusLatestNode = true;
             let isStoryFullscreen = false;
             let isStoryCollapsed = true;
@@ -1608,6 +1648,35 @@
             let colResizeDrag = null;
             let splitResizeRaf = null;
             let lastSplitPointerX = 0;
+
+            function stopThinkingPhaseTicker() {
+                if (thinkingPhaseTimer) {
+                    clearInterval(thinkingPhaseTimer);
+                    thinkingPhaseTimer = null;
+                }
+            }
+
+            function startThinkingPhaseTicker() {
+                stopThinkingPhaseTicker();
+                thinkingPhaseIndex = 0;
+                const phases = resolveThinkingPhases();
+                const apply = function() {
+                    const $msg = $('#temp-ai-message .thinking-text');
+                    if (!$msg.length) {
+                        stopThinkingPhaseTicker();
+                        return;
+                    }
+                    // 到达最后一个阶段后停留，不再循环
+                    const idx = Math.min(thinkingPhaseIndex, phases.length - 1);
+                    const text = phases[idx] || tr('app.request.thinking', 'Thinking');
+                    $msg.text(text);
+                    if (thinkingPhaseIndex < phases.length - 1) {
+                        thinkingPhaseIndex += 1;
+                    }
+                };
+                apply();
+                thinkingPhaseTimer = setInterval(apply, 1200);
+            }
 
             function canResizeChatColumns() {
                 const modeToPanel = { left_max: 'left', center_max: 'center', right_max: 'right' };
@@ -1644,37 +1713,6 @@
 
             function escapeHtml(str) {
                 return $('<div/>').text(str == null ? '' : String(str)).html();
-            }
-
-            function normalizeWorkspaceModeClient(mode) {
-                const raw = String(mode || '').trim().toLowerCase().replace(/-/g, '_');
-                if (raw === 'aria_engineer' || raw === 'engineer' || raw === 'autocad') return 'aria_engineer_autocad';
-                if (raw === 'aria' || raw === 'aria_engineer_autocad') return raw;
-                return 'aria';
-            }
-
-            function workspaceModeLabel(mode) {
-                const normalized = normalizeWorkspaceModeClient(mode);
-                if (normalized === 'aria_engineer_autocad') {
-                    return tr('app.workspaceMode.engineerAutocad', 'ARIA Engineer (AutoCAD)');
-                }
-                return tr('app.workspaceMode.aria', 'ARIA (General Assistant)');
-            }
-
-            function renderWorkspaceModeBadge(mode) {
-                const label = workspaceModeLabel(mode);
-                const prefix = tr('app.workspaceMode.badgePrefix', 'Workspace');
-                $('#workspace-mode-badge').text(`${prefix}: ${label}`);
-                const normalized = normalizeWorkspaceModeClient(mode);
-                const isEngineer = normalized === 'aria_engineer_autocad';
-                $('body').toggleClass('workspace-mode-engineer', isEngineer);
-                if (isEngineer) {
-                    $('#workspace-mode-banner')
-                        .removeClass('d-none')
-                        .text(tr('app.workspaceMode.engineerBanner', 'Engineering mode is active. CAD-safe tool allowlist is enforced.'));
-                } else {
-                    $('#workspace-mode-banner').addClass('d-none');
-                }
             }
 
             function formatTimestamp(ts) {
@@ -2106,7 +2144,7 @@
                         `<button type="button" class="btn btn-link btn-sm p-0 ms-2 align-baseline" id="chat-welcome-show-btn" data-i18n="app.chat.welcomeShowTips">${escapeHtml(tr('app.chat.welcomeShowTips', 'Show tips'))}</button>` +
                         `</div>` +
                         `<div class="chat-welcome text-center" id="chat-empty-hint">` +
-                        `<div class="chat-welcome-avatar" aria-hidden="true"><img src="/static/img/aria-avatar.png" width="56" height="56" alt=""></div>` +
+                        `<div class="chat-welcome-avatar" aria-hidden="true"><img src="${avatarSrc}" width="56" height="56" alt="" onerror="this.style.display='none'"></div>` +
                         `<div class="welcome-title" data-i18n="app.chat.welcomeTitle">${escapeHtml(tr('app.chat.welcomeTitle', "Hi, I'm ARIA"))}</div>` +
                         `<p class="welcome-lead mb-0" data-i18n="app.chat.welcomeLead">${escapeHtml(tr('app.chat.welcomeLead', 'Ask in plain language — I will plan, execute, and learn from experience.'))}</p>` +
                         `<ul class="text-start mx-auto mt-3" style="max-width:300px;">` +
@@ -2212,9 +2250,11 @@
                     } else {
                         const meta = msg.meta || {};
                         const _tuLine = formatTokenUsageLine(meta.token_usage);
-                        const foot = _tuLine
-                            ? `<div class="token-usage-note text-muted mt-1" style="font-size:12px;">${escapeHtml(_tuLine)}</div>`
-                            : '';
+                        const _elapsedLine = formatElapsedLine(meta.elapsed_ms);
+                        const foot = [
+                            _tuLine ? `<div class="token-usage-note text-muted mt-1" style="font-size:12px;">${escapeHtml(_tuLine)}</div>` : '',
+                            _elapsedLine ? `<div class="elapsed-note text-muted mt-1" style="font-size:12px;">${escapeHtml(_elapsedLine)}</div>` : '',
+                        ].join('');
                         $chat.append(`
                             <div class="chat-message ai-message">
                                 <div class="message-content">${escapeHtml(msg.content || '').replace(/\n/g, '<br>')}</div>
@@ -2276,10 +2316,53 @@
                     renderWorkflowAndLogs(currentLogs, currentWorkflowEvents);
                     return;
                 }
+                updateAssignedAgentsPanel(currentWorkflowEvents);
                 renderStoryGraph(currentWorkflowEvents);
                 renderCompactEventStream(currentWorkflowEvents);
                 const $area = $('#execution-log-area');
                 $area.scrollTop($area.prop('scrollHeight'));
+            }
+
+            function getAssignedAgentsFromEvents(events) {
+                const rows = Array.isArray(events) ? events : [];
+                const out = [];
+                const seen = new Set();
+                rows.forEach((evt) => {
+                    if (!evt || evt.stage !== 'agent_create' || evt.status !== 'success') return;
+                    const payload = evt.payload || {};
+                    const agents = Array.isArray(payload.agents) ? payload.agents : [];
+                    agents.forEach((a) => {
+                        const aid = String((a && a.agent_id) || '').trim();
+                        if (!aid || seen.has(aid)) return;
+                        seen.add(aid);
+                        const sp = (a && a.selected_personality) ? a.selected_personality : {};
+                        out.push({
+                            agent_name: String((a && a.agent_name) || aid.slice(0, 8)),
+                            agent_type: String((a && a.agent_type) || ''),
+                            step: String((a && a.step) || ''),
+                            personality: String(sp.label || sp.id || ''),
+                        });
+                    });
+                });
+                return out;
+            }
+
+            function updateAssignedAgentsPanel(events) {
+                const $list = $('#exec-assigned-agents-list');
+                if (!$list.length) return;
+                const assigned = getAssignedAgentsFromEvents(events);
+                if (!assigned.length) {
+                    $list.html(`<div class="text-muted" style="font-size:12px;">${escapeHtml(tr('app.exec.noAssignments', 'No agent assignment detected yet (may be action-mode execution).'))}</div>`);
+                    return;
+                }
+                const html = assigned.map((a) => {
+                    const name = escapeHtml(a.agent_name || '-');
+                    const type = escapeHtml(a.agent_type || '-');
+                    const step = escapeHtml(a.step || '');
+                    const persona = escapeHtml(a.personality || '-');
+                    return `<div class="text-muted" style="font-size:12px;">${name} · ${type} · ${persona}${step ? ` · ${step}` : ''}</div>`;
+                }).join('');
+                $list.html(html);
             }
 
             function loadWorkflowEvents(forceSnapshot) {
@@ -2306,9 +2389,12 @@
                 });
             }
 
+            /** 轮询默认间隔；SSE 连上后由 onopen/onmessage 停止轮询，仅在断线降级时使用 */
+            const WORKFLOW_POLL_MS_DEFAULT = 800;
+
             function startWorkflowPolling(intervalMs) {
                 if (workflowPollTimer) clearInterval(workflowPollTimer);
-                const ms = typeof intervalMs === 'number' && intervalMs > 0 ? intervalMs : 800;
+                const ms = typeof intervalMs === 'number' && intervalMs > 0 ? intervalMs : WORKFLOW_POLL_MS_DEFAULT;
                 workflowPollTimer = setInterval(function() { loadWorkflowEvents(false); }, ms);
             }
 
@@ -2344,6 +2430,9 @@
                     }
                     try {
                         workflowEventSource = new EventSource(`/api/workflow_stream?conversation_id=${encodeURIComponent(cid)}`);
+                        workflowEventSource.onopen = function() {
+                            stopWorkflowPolling();
+                        };
                         workflowEventSource.onmessage = function(evt) {
                             try {
                                 const payload = JSON.parse(evt.data || '{}');
@@ -2370,6 +2459,7 @@
                                 }
                                 currentWorkflowEvents.push(payload);
                                 appendWorkflowEventToDom(payload);
+                                stopWorkflowPolling();
                                 return;
                             } catch (e) {}
                             // JSON 解析失败再回退全量刷新（任务进行中勿刷，避免与长请求打架）
@@ -2378,7 +2468,7 @@
                             }
                         };
                         workflowEventSource.onerror = function() {
-                            // SSE 断线时降级为轮询；任务进行中不启轮询；首次用较低频降低闪烁
+                            // SSE 断线时降级为轮询；任务进行中不启轮询；连上后 onopen/onmessage 会停轮询
                             if (isTaskRunning) return;
                             if (!workflowPollTimer) {
                                 startWorkflowPolling(2000);
@@ -2944,12 +3034,14 @@
                     `${localAttachments ? `<div class="chat-message-attachments">${localAttachments}</div>` : ''}` +
                     `</div>`
                 );
-                const thinking = tr('app.request.thinking', 'Thinking');
                 $chat.append(
                     `<div class="chat-message ai-message" id="temp-ai-message"><div class="message-content ai-typing-indicator">` +
-                    `${escapeHtml(thinking)}<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>` +
+                    `<i class="fa fa-circle-notch thinking-icon" aria-hidden="true"></i>` +
+                    `<span class="thinking-text">${escapeHtml(tr('app.request.thinking', 'Thinking'))}</span>` +
+                    `<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>` +
                     `</div></div>`
                 );
+                startThinkingPhaseTicker();
                 $chat.scrollTop($chat.prop('scrollHeight'));
             }
 
@@ -3205,7 +3297,12 @@
                         <div class="card-body py-2 px-3">
                             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
                                 <div class="text-muted fw-semibold" style="font-size:12px;">${et(tr('app.exec.title', 'Execution control'))}</div>
+                                <div id="exec-elapsed-label" class="text-muted" style="font-size:12px;"></div>
                                 <div class="text-muted" style="font-size:12px;">${et(tr('app.exec.sessionLabel', 'Session'))}: ${sidBlock}</div>
+                            </div>
+                            <div class="mb-2">
+                                <div class="text-muted" style="font-size:12px;">${et(tr('app.exec.assignedAgents', 'Assigned agents'))}</div>
+                                <div id="exec-assigned-agents-list"></div>
                             </div>
                             <div class="d-flex align-items-center" style="gap:8px;flex-wrap:wrap;">
                                 <button class="btn btn-outline-secondary btn-sm exec-pause-btn" type="button" ${disabled}
@@ -3219,6 +3316,7 @@
                     </div>
                 `;
                 $area.prepend(panel);
+                updateAssignedAgentsPanel(currentWorkflowEvents || []);
             }
 
             function pollExecutionStatusOnce() {
@@ -3233,6 +3331,10 @@
                             return;
                         }
                         const done = ['completed', 'aborted', 'manual_takeover'].includes(resp.status || '');
+                        const elapsedLine = formatElapsedLine(resp.elapsed_ms);
+                        if (elapsedLine) {
+                            $('#exec-elapsed-label').text(elapsedLine);
+                        }
                         const report = resp.report || [];
                         if (report.length) {
                             const key = JSON.stringify(report.map((r) => ({
@@ -3333,14 +3435,7 @@
                 function processWithConversationId(convId) {
                     const hasFiles = pendingChatFiles.length > 0;
                     const onSuccess = function(resp) {
-                        if (resp && resp.workspace_mode) {
-                            const normalized = normalizeWorkspaceModeClient(resp.workspace_mode);
-                            $('#aria-workspace-mode').val(normalized);
-                            renderWorkspaceModeBadge(normalized);
-                            try {
-                                localStorage.setItem('aria_workspace_mode', normalized);
-                            } catch (e) { /* ignore */ }
-                        }
+                        stopThinkingPhaseTicker();
                         pendingChatFiles = [];
                         $('#chat-file-input').val('');
                         renderPendingAttachHint();
@@ -3353,18 +3448,15 @@
                         if (currentConversationId && currentExecutionSessionId) {
                             conversationExecutionSessionMap[currentConversationId] = currentExecutionSessionId;
                         }
-                        const delegationNarrative = String(resp.delegation_narrative || '').trim();
-                        const delegationHtml = delegationNarrative
-                            ? `<div class="small text-muted mb-1"><i class="fa fa-user-cog mr-1"></i>${escapeHtml(delegationNarrative)}</div>`
-                            : '';
                         const escaped = escapeHtml(resp.result || '').replace(/\n/g, '<br>');
-                        $('#temp-ai-message .message-content').html(`${delegationHtml}${escaped}`);
+                        $('#temp-ai-message .message-content').html(`${escaped}`);
                         if (resp.cancelled) {
                             $('#chat .chat-area').append(
                                 `<div class="chat-message ai-message"><div class="message-content text-warning">${escapeHtml(tr('app.request.cancelled', 'Task cancelled. No further actions will run.'))}</div></div>`
                             );
                         }
                         appendTokenUsageToAiMessage($('#temp-ai-message'), resp.token_usage);
+                        appendElapsedToAiMessage($('#temp-ai-message'), resp.elapsed_ms);
                         $('#temp-ai-message').removeAttr('id');
                         if (resp.needs_confirmation && resp.pending_actions) {
                             renderPendingActionsCard(resp.pending_actions);
@@ -3380,6 +3472,7 @@
                         loadMethodologies();
                     };
                     const onError = function(xhr) {
+                        stopThinkingPhaseTicker();
                         let msg = tr('app.request.failed', 'Request failed. Please retry later.');
                         if (xhr && xhr.responseJSON && typeof xhr.responseJSON === 'object') {
                             const j = xhr.responseJSON;
@@ -3391,6 +3484,7 @@
                         $('#temp-ai-message .message-content').html(`<span class="text-danger">${escapeHtml(msg)}</span>`);
                     };
                     const onComplete = function() {
+                        stopThinkingPhaseTicker();
                         $sendBtn.show();
                         $cancelBtn.hide().prop('disabled', true).attr('title', tr('common.cancel', 'Cancel')).html('<i class="fa fa-stop"></i>');
                         $input.prop('disabled', false);
@@ -3411,7 +3505,6 @@
                         fd.append('new_task', sendAsNewTask ? 'true' : 'false');
                         fd.append('action_screenshots', isActionScreenshotsEnabled() ? 'true' : 'false');
                         fd.append('react_mode', isReactModeEnabled() ? 'true' : 'false');
-                        fd.append('workspace_mode', getWorkspaceMode());
                         pendingChatFiles.forEach(function(f) { fd.append('files', f); });
                         $.ajax({
                             url: '/api/process_input',
@@ -3436,7 +3529,6 @@
                                 new_task: !!sendAsNewTask,
                                 action_screenshots: isActionScreenshotsEnabled(),
                                 react_mode: isReactModeEnabled(),
-                                workspace_mode: getWorkspaceMode(),
                             }),
                             success: onSuccess,
                             error: onError,
@@ -3460,6 +3552,7 @@
                             processWithConversationId(currentConversationId);
                         },
                         error: function() {
+                            stopThinkingPhaseTicker();
                             $('#temp-ai-message .message-content').html(`<span class="text-danger">${tr('app.conv.createFailed', 'Failed to create conversation. Please retry later.')}</span>`);
                             // 恢复发送按钮，隐藏中止按钮
                             $sendBtn.show();
@@ -3505,33 +3598,12 @@
                     } catch (e) { /* ignore */ }
                 });
             })();
-            (function initWorkspaceModeSelector() {
-                const $sel = $('#aria-workspace-mode');
-                let mode = 'aria';
-                try {
-                    mode = normalizeWorkspaceModeClient(localStorage.getItem('aria_workspace_mode') || 'aria');
-                } catch (e) { /* ignore */ }
-                $sel.val(mode);
-                renderWorkspaceModeBadge(mode);
-                $sel.on('change', function() {
-                    const normalized = normalizeWorkspaceModeClient($(this).val());
-                    $(this).val(normalized);
-                    renderWorkspaceModeBadge(normalized);
-                    try {
-                        localStorage.setItem('aria_workspace_mode', normalized);
-                    } catch (e) { /* ignore */ }
-                });
-            })();
             function isActionScreenshotsEnabled() {
                 return $('#aria-action-screenshots').is(':checked');
             }
             function isReactModeEnabled() {
                 return $('#aria-react-mode').is(':checked');
             }
-            function getWorkspaceMode() {
-                return normalizeWorkspaceModeClient($('#aria-workspace-mode').val());
-            }
-
             $('#chat-attach-btn').on('click', function() { $('#chat-file-input').trigger('click'); });
             $('#chat-file-input').on('change', function() {
                 addPendingChatFiles(this.files);

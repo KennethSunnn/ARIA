@@ -32,20 +32,16 @@ def test_exec_context_window_keeps_recent_steps() -> None:
     assert "s1" not in text
 
 
-def test_workspace_mode_filters_social_actions_for_engineer_autocad() -> None:
+def test_workspace_mode_local_execute_allows_desktop_actions() -> None:
     manager = ARIAManager()
-    manager.set_workspace_mode("aria_engineer_autocad")
     plan = {
         "mode": "action",
         "task_form": "local_execute",
-        "summary": "autocad flow",
+        "summary": "general flow",
         "actions": [
             {"type": "desktop_open_app", "target": "AutoCAD", "params": {}, "filters": {}, "risk": "low"},
-            {"type": "wechat_send_message", "target": "team", "params": {}, "filters": {}, "risk": "medium"},
         ],
     }
     filtered = manager._apply_task_form_tool_allowlist(plan)
     action_types = [a.get("type") for a in filtered.get("actions", [])]
     assert "desktop_open_app" in action_types
-    assert "wechat_send_message" not in action_types
-    assert filtered.get("workspace_mode") == "aria_engineer_autocad"

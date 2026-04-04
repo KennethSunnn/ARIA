@@ -71,7 +71,7 @@ class VolcengineLLM:
         self.api_key = (api_key or "").strip() or resolve_inference_api_key()
         self.max_retries = 3
         self.timeout_s = float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
-        self.enable_thinking = os.getenv("ENABLE_THINKING", "true").strip().lower() in ("1", "true", "yes", "on")
+        self.enable_thinking = os.getenv("ENABLE_THINKING", "false").strip().lower() in ("1", "true", "yes", "on")
         self._client: OpenAI | None = None
         self._rebuild_client()
         if self.api_key:

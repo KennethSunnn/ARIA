@@ -18,3 +18,4 @@ pytesseract>=0.3.13
 
 # 浏览器自动化（可选）
 playwright>=1.40.0
+mcp

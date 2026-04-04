@@ -8,9 +8,9 @@
     "min_expected_hits": 1
   },
   {
-    "name": "wechat_send_message",
+    "name": "wechat_send_via_computer_use",
     "query": "给张三发微信：明天10点开会",
-    "expected_keywords": ["wechat_send_message"],
+    "expected_keywords": ["computer_screenshot", "computer_click", "computer_type"],
     "expected_mode": "action",
     "expected_risk_level": "safe",
     "min_expected_hits": 1

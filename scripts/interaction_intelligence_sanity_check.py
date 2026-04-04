@@ -15,8 +15,8 @@ def main() -> None:
     assert float(r1["confidence"]) > 0.5
 
     r2 = core.normalize_result(
-        "wechat_send_message",
-        {"success": False, "message": "wechat_send_failed", "stderr": "target_not_found"},
+        "messaging_send",
+        {"success": False, "message": "messaging_send_failed", "stderr": "target_not_found"},
     )
     assert r2["safe_block_reason"] == "unresolved_target"
     assert float(r2["confidence"]) <= 0.35 + 1e-6

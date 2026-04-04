@@ -1,0 +1,37 @@
+{
+  "note": "Sample local run via scripts/measure_process_input_perf.py (full response time, not browser TTFB). Re-run after env or model changes.",
+  "host": "127.0.0.1:5000",
+  "date": "2026-04-01",
+  "scenarios": [
+    {
+      "name": "plain",
+      "elapsed_ms": 97621.3,
+      "token_usage": {
+        "completion_tokens": 4815,
+        "llm_calls": 7,
+        "prompt_tokens": 5354,
+        "total_tokens": 10169
+      }
+    },
+    {
+      "name": "react",
+      "elapsed_ms": 94521.8,
+      "token_usage": {
+        "completion_tokens": 3764,
+        "llm_calls": 7,
+        "prompt_tokens": 5402,
+        "total_tokens": 9166
+      }
+    },
+    {
+      "name": "react+computer_use_vision",
+      "elapsed_ms": 86323.0,
+      "token_usage": {
+        "completion_tokens": 4237,
+        "llm_calls": 7,
+        "prompt_tokens": 5452,
+        "total_tokens": 9689
+      }
+    }
+  ]
+}

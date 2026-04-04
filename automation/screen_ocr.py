@@ -222,7 +222,7 @@ def ocr_screen(
         return {
             "success": True,
             "error": None,
-            "text": text.strip(),
+            "text": (text or "").strip(),
             "blocks": blocks,
         }
         

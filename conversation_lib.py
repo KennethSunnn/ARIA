@@ -157,9 +157,9 @@ class ConversationLibrary:
         self,
         conversation_id: str,
         *,
-        max_messages: int = 12,
-        max_chars_per_message: int = 1000,
-        max_total_chars: int = 9000,
+        max_messages: int = 20,  # 从 12 增加到 20
+        max_chars_per_message: int = 1500,  # 从 1000 增加到 1500
+        max_total_chars: int = 12000,  # 从 9000 增加到 12000
     ) -> str:
         """在写入本轮 user 消息之前调用：用已有消息拼出近期对话，供规划器/解析器理解指代。"""
         conv = self.get_conversation(conversation_id)

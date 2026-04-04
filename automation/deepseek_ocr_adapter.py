@@ -1,0 +1,237 @@
+"""
+DeepSeek OCR 适配器 - 使用 VLM (Vision Language Model) 进行智能 OCR
+
+相比 Tesseract：
+- 理解上下文，能区分联系人名和消息内容
+- 更准确识别中英文混合文本
+- 自动过滤噪音和无关内容
+
+依赖：
+- 需要配置支持 vision 的模型（如 doubao-vision 或 DeepSeek-VL）
+- 通过 OpenAI 兼容接口调用
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import logging
+import os
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+def _check_vlm_available() -> tuple[bool, str]:
+    """检查 VLM 是否可用"""
+    try:
+        from llm.volcengine_llm import VolcengineLLM
+        llm = VolcengineLLM()
+        if not llm.api_key:
+            return False, "vlm_api_key_missing"
+        return True, ""
+    except Exception as e:
+        return False, f"vlm_unavailable:{e}"
+
+
+def _image_to_base64(image) -> str:
+    """将 PIL Image 转为 base64 编码"""
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+def ocr_screen_with_vlm(
+    region: tuple[int, int, int, int] | None = None,
+    *,
+    task: str = "contact_search",
+    contact_name: str = "",
+) -> dict[str, Any]:
+    """
+    使用 VLM 进行智能 OCR 识别
+
+    Args:
+        region: (left, top, width, height) 或 None（全屏）
+        task: 识别任务类型
+            - "contact_search": 识别微信搜索结果中的联系人名
+            - "free_ocr": 自由 OCR，识别所有文本
+        contact_name: 目标联系人名（用于 contact_search 任务）
+
+    Returns:
+        {
+            "success": bool,
+            "error": str|None,
+            "text": "完整识别文本",
+            "blocks": [
+                {"text": "联系人名", "bbox": [x, y, w, h], "confidence": int},
+                ...
+            ],
+            "strategy": "vlm"  # 标识使用了 VLM
+        }
+    """
+    # 检查 VLM 可用性
+    ok, err = _check_vlm_available()
+    if not ok:
+        return {"success": False, "error": err, "text": "", "blocks": [], "strategy": "vlm"}
+
+    try:
+        from automation import screen_ocr
+        from llm.volcengine_llm import VolcengineLLM
+
+        # 截图
+        screenshot = screen_ocr.capture_screen(region)
+
+        # 转为 base64
+        img_b64 = _image_to_base64(screenshot)
+
+        # 构建 prompt
+        if task == "contact_search":
+            prompt = f"""这是微信搜索结果的截图。请识别图中所有可能的联系人名称。
+
+目标联系人：{contact_name}
+
+要求：
+1. 只返回联系人名称，不要返回消息内容、时间、"微搜"等无关文本
+2. 每行一个名称
+3. 如果看到目标联系人，优先列出
+4. 忽略明显的UI元素（如"搜一搜"、"小程序"、"公众号"）
+
+直接输出联系人名称列表，不要解释："""
+        else:
+            prompt = "请识别图中的所有文本内容，按从上到下、从左到右的顺序输出："
+
+        # 调用 VLM
+        llm = VolcengineLLM()
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{img_b64}"}
+                    }
+                ]
+            }
+        ]
+
+        text, _usage = llm.generate(messages)
+
+        # generate() 在无 api_key 时返回提示字符串而非抛异常
+        if not text or text.startswith("请先设置"):
+            return {
+                "success": False,
+                "error": f"vlm_call_failed:{text[:80]}",
+                "text": "",
+                "blocks": [],
+                "strategy": "vlm"
+            }
+
+        text = text.strip()
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+        # 构建 blocks（VLM 通常不返回精确坐标，给个估算）
+        blocks = []
+        img_width, img_height = screenshot.size
+        for i, line in enumerate(lines):
+            # 估算位置：从上到下排列
+            y_ratio = (i + 1) / (len(lines) + 1)
+            blocks.append({
+                "text": line,
+                "bbox": [
+                    int(img_width * 0.1),  # 左侧 10%
+                    int(img_height * y_ratio),
+                    int(img_width * 0.3),  # 宽度 30%
+                    20  # 高度估算
+                ],
+                "confidence": 90  # VLM 置信度通常较高
+            })
+
+        return {
+            "success": True,
+            "error": None,
+            "text": text,
+            "blocks": blocks,
+            "strategy": "vlm"
+        }
+
+    except Exception as e:
+        logger.error(f"ocr_screen_with_vlm_failed: {e}")
+        return {
+            "success": False,
+            "error": f"vlm_ocr_failed:{str(e)}",
+            "text": "",
+            "blocks": [],
+            "strategy": "vlm"
+        }
+
+
+def find_contact_with_vlm(
+    contact_name: str,
+    region: tuple[int, int, int, int] | None = None,
+) -> dict[str, Any]:
+    """
+    使用 VLM 在屏幕上查找联系人
+
+    Args:
+        contact_name: 要查找的联系人名
+        region: (left, top, width, height) 或 None（全屏）
+
+    Returns:
+        {
+            "success": bool,
+            "error": str|None,
+            "matches": [
+                {
+                    "text": "匹配的联系人名",
+                    "bbox": [x, y, w, h],
+                    "center": [cx, cy],
+                    "confidence": int
+                },
+                ...
+            ],
+            "strategy": "vlm"
+        }
+    """
+    result = ocr_screen_with_vlm(
+        region=region,
+        task="contact_search",
+        contact_name=contact_name
+    )
+
+    if not result["success"]:
+        return {**result, "matches": []}
+
+    # 查找匹配项
+    matches = []
+    search_lower = contact_name.lower()
+
+    for block in result["blocks"]:
+        block_text = block["text"]
+        if search_lower in block_text.lower() or block_text.lower() in search_lower:
+            matches.append({
+                "text": block_text,
+                "bbox": block["bbox"],
+                "center": [
+                    block["bbox"][0] + block["bbox"][2] // 2,
+                    block["bbox"][1] + block["bbox"][3] // 2
+                ],
+                "confidence": block["confidence"]
+            })
+
+    return {
+        "success": True,
+        "error": None,
+        "matches": matches,
+        "strategy": "vlm"
+    }
+
+
+def get_capability_summary() -> str:
+    """获取 DeepSeek OCR 能力描述"""
+    ok, _ = _check_vlm_available()
+
+    if not ok:
+        return "【DeepSeek OCR】未配置（需要支持 vision 的 API Key）。"
+
+    return "【DeepSeek OCR】已配置：使用 VLM 进行智能 OCR，能理解上下文并过滤噪音。"

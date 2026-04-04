@@ -1,3 +1,38 @@
 【跨应用桌面自动化】优先用 desktop_open_app、desktop_hotkey、desktop_type、desktop_sequence 描述「打开某软件并按键/输入」的通用流程；高度依赖前台焦点。desktop_sequence：params.steps 为数组，每步为 {"type":"sleep","seconds":0.5} 或 {"type":"hotkey","hotkey":"ctrl+v"} 或 {"type":"type","text":"..."}；用于任意软件的脚本化操作（须用户确认）。
-【微信专用快捷动作】wechat_send_message / wechat_open_chat / wechat_check_login：联系人填 params.contact_name（或顶层 target），消息填 params.message；params.use_desktop 默认 true；params.is_enterprise 为企业微信。若上一步已 wechat_open_chat 与本轮同一联系人，本轮 wechat_send_message 须 params.skip_contact_search=true，否则会全局搜索两次。发微信前建议用户先点击微信窗口。禁止用 web_understand / browser_open 去搜「如何发微信」——应直接 wechat_send_message。同一任务不要同时输出 wechat_open_chat 与 wechat_send_message（会搜两次）；只输出一条 wechat_send_message 即可。若确需分步，第二条须 skip_contact_search。
-【合规】微信动作须用户确认；不自动加好友、不群发、不处理转账红包。
+
+【Computer Use 视觉操作 — 微信/企微/小红书等原生 App 必须使用此方式】
+
+⚠️ 三条强制规则（违反任一条则方案无效）：
+
+规则 1【依赖预检】：方案前两步必须是 desktop_open_app + computer_screenshot。缺少这两步，后续所有 hotkey/type/click 都会打到错误窗口，整个方案失效。
+
+规则 2【关键节点校验】：高风险操作前后必须有 computer_screenshot 校验：
+  - 点击联系人后：截图确认聊天窗口标题/联系人名称正确（防止发错人）
+  - 发送消息后：截图确认消息出现在聊天记录中（证明发送成功）
+  缺少校验无法证明操作正确，视为任务未完成。
+
+规则 3【方案调整时同步校验】：若因失败（如 OCR 不可用）而调整方案，调整后的方案必须保留所有校验节点，不得因方案简化而省略。
+
+工具清单：
+- computer_screenshot：截取当前屏幕（params 为空 {}），返回截图供下一步推理坐标。
+- computer_click：点击坐标（params.x, params.y，可选 coord_space=normalized_1000 则坐标按 0-1000 比例缩放）。
+- computer_double_click：双击坐标（同 click params）。
+- computer_type：向当前焦点控件输入文本（params.text），支持中文。
+- computer_key：按键/快捷键（params.keys，如 "ctrl+a"、"enter"、"escape"）。
+- computer_scroll：在坐标处滚动（params.x, params.y, params.clicks，正数向上，负数向下）。
+- computer_move：移动鼠标到坐标（params.x, params.y），不点击。
+- computer_drag：拖拽（params.x, params.y → params.x2, params.y2）。
+- computer_wait：等待（params.seconds）。
+
+发送微信消息标准模板（严格按此顺序，每步均为必须）：
+  1. desktop_open_app target=微信（确保前台打开）
+  2. computer_screenshot params={}（依赖预检：查看初始界面）
+  3. computer_click 点击搜索框坐标（从截图推理）
+  4. computer_type params.text=联系人名
+  5. computer_screenshot params={}（查看搜索结果）
+  6. computer_click 点击正确联系人条目坐标
+  7. computer_screenshot params={}（校验：确认聊天窗口标题为目标联系人）
+  8. computer_click 点击消息输入框坐标
+  9. computer_type params.text=消息内容
+  10. computer_key params.keys=enter
+  11. computer_screenshot params={}（校验：确认消息出现在聊天记录中）

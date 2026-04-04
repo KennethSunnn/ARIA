@@ -1,9 +1,127 @@
 {
-  "generated_at": "placeholder",
-  "total_cases": 0,
-  "matched_cases": 0,
-  "strict_passed_cases": 0,
-  "match_rate": 0.0,
-  "strict_pass_rate": 0.0,
-  "rows": []
+  "generated_at": "2026-04-01 23:30:33",
+  "orchestration_runtime": "runtime_scheduler",
+  "max_parallel_agents": 2,
+  "total_cases": 4,
+  "matched_cases": 4,
+  "strict_passed_cases": 4,
+  "match_rate": 1.0,
+  "strict_pass_rate": 1.0,
+  "runtime_loop_total_cases": 4,
+  "runtime_loop_passed_cases": 4,
+  "runtime_loop_pass_rate": 1.0,
+  "runtime_loop_ok": true,
+  "computer_use_total_cases": 2,
+  "computer_use_passed_cases": 2,
+  "computer_use_pass_rate": 1.0,
+  "computer_use_ok": true,
+  "strict_ok": true,
+  "rows": [
+    {
+      "name": "browser_search_python",
+      "mode": "action",
+      "risk_level": "safe",
+      "actions": [
+        "web_understand",
+        "browser_open"
+      ],
+      "expected_hit": 1,
+      "expected_total": 3,
+      "mode_ok": true,
+      "risk_ok": true,
+      "hit_ok": true,
+      "strict_ok": true
+    },
+    {
+      "name": "messaging_send_message",
+      "mode": "action",
+      "risk_level": "safe",
+      "actions": [
+        "messaging_send"
+      ],
+      "expected_hit": 1,
+      "expected_total": 1,
+      "mode_ok": true,
+      "risk_ok": true,
+      "hit_ok": true,
+      "strict_ok": true
+    },
+    {
+      "name": "file_organize_pdf",
+      "mode": "action",
+      "risk_level": "safe",
+      "actions": [
+        "file_move"
+      ],
+      "expected_hit": 1,
+      "expected_total": 1,
+      "mode_ok": true,
+      "risk_ok": true,
+      "hit_ok": true,
+      "strict_ok": true
+    },
+    {
+      "name": "desktop_hotkey_demo",
+      "mode": "action",
+      "risk_level": "safe",
+      "actions": [
+        "desktop_open_app",
+        "desktop_type"
+      ],
+      "expected_hit": 2,
+      "expected_total": 2,
+      "mode_ok": true,
+      "risk_ok": true,
+      "hit_ok": true,
+      "strict_ok": true
+    }
+  ],
+  "runtime_loop_rows": [
+    {
+      "name": "recoverable_error_then_success",
+      "attempts": 2,
+      "final_state": "success",
+      "manual_takeover_required": false,
+      "expected_state": "success",
+      "expected_manual_takeover": false,
+      "strict_ok": true
+    },
+    {
+      "name": "verify_failed_then_manual_takeover",
+      "attempts": 2,
+      "final_state": "verify_failed",
+      "manual_takeover_required": true,
+      "expected_state": "verify_failed",
+      "expected_manual_takeover": true,
+      "strict_ok": true
+    },
+    {
+      "name": "retry_exhausted_recoverable",
+      "attempts": 2,
+      "final_state": "recoverable_error",
+      "manual_takeover_required": true,
+      "expected_state": "recoverable_error",
+      "expected_manual_takeover": true,
+      "strict_ok": true
+    },
+    {
+      "name": "cancelled_inflight",
+      "attempts": 1,
+      "final_state": "cancelled",
+      "manual_takeover_required": false,
+      "expected_state": "cancelled",
+      "expected_manual_takeover": false,
+      "strict_ok": true
+    }
+  ],
+  "computer_use_rows": [
+    {
+      "name": "computer_use_norm_origin",
+      "strict_ok": true
+    },
+    {
+      "name": "computer_use_allow_region_enforced",
+      "strict_ok": true
+    }
+  ]
 }

@@ -27,6 +27,7 @@ id_rsa
 id_ed25519
 
 # IDE / OS
+.cursor/
 .idea/
 .vscode/
 *.swp
@@ -35,3 +36,10 @@ Thumbs.db
 
 # Accidental copies of user Desktop under repo root (e.g. drag-dropped folder)
 桌面/
+
+# Third-party downloaded repos (not dependencies)
+DeepSeek-OCR-2-main/
+agency-agents-main/
+
+# Test cache
+.pytest_cache/

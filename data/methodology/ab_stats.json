@@ -1,5 +1,210 @@
 {
-  "pairs": {},
-  "methods": {},
-  "updated_at": "placeholder"
+  "pairs": {
+    "22ec8704-8a11-4ae0-b5bc-f42794263c1a|d7c59587-9c30-41e7-b065-832df8ed6421": {
+      "A": {
+        "method_id": "d7c59587-9c30-41e7-b065-832df8ed6421",
+        "trials": 1,
+        "wins": 1
+      },
+      "B": {
+        "method_id": "22ec8704-8a11-4ae0-b5bc-f42794263c1a",
+        "trials": 0,
+        "wins": 0
+      },
+      "trials": 1,
+      "last_outcome": {
+        "chosen": "A",
+        "is_success": true,
+        "quality_score": 1.0,
+        "at": "2026-04-03 14:06:06"
+      }
+    },
+    "cc9f2c16-1c08-4cb6-b287-f9027f977597|cdc3d2bb-b4e2-4691-bab1-3099cb2e2b02": {
+      "A": {
+        "method_id": "cdc3d2bb-b4e2-4691-bab1-3099cb2e2b02",
+        "trials": 1,
+        "wins": 1
+      },
+      "B": {
+        "method_id": "cc9f2c16-1c08-4cb6-b287-f9027f977597",
+        "trials": 0,
+        "wins": 0
+      },
+      "trials": 1,
+      "last_outcome": {
+        "chosen": "A",
+        "is_success": true,
+        "quality_score": 1.0,
+        "at": "2026-04-03 22:29:13"
+      }
+    },
+    "a13d5490-ad60-4af5-a8cd-447f295117a7|cc9f2c16-1c08-4cb6-b287-f9027f977597": {
+      "A": {
+        "method_id": "cc9f2c16-1c08-4cb6-b287-f9027f977597",
+        "trials": 1,
+        "wins": 1
+      },
+      "B": {
+        "method_id": "a13d5490-ad60-4af5-a8cd-447f295117a7",
+        "trials": 0,
+        "wins": 0
+      },
+      "trials": 1,
+      "last_outcome": {
+        "chosen": "A",
+        "is_success": true,
+        "quality_score": 1.0,
+        "at": "2026-04-03 22:32:34"
+      }
+    },
+    "12522343-ca44-4d55-9605-5756e35ee4fa|c26bb1d6-7ab7-4d87-a9b4-b6dbb01326b7": {
+      "A": {
+        "method_id": "c26bb1d6-7ab7-4d87-a9b4-b6dbb01326b7",
+        "trials": 0,
+        "wins": 0
+      },
+      "B": {
+        "method_id": "12522343-ca44-4d55-9605-5756e35ee4fa",
+        "trials": 1,
+        "wins": 1
+      },
+      "trials": 1,
+      "last_outcome": {
+        "chosen": "B",
+        "is_success": true,
+        "quality_score": 1.0,
+        "at": "2026-04-03 22:36:19"
+      }
+    },
+    "a2e13b4a-817b-4b37-9a36-1ec23771a9e4|cc9f2c16-1c08-4cb6-b287-f9027f977597": {
+      "A": {
+        "method_id": "cc9f2c16-1c08-4cb6-b287-f9027f977597",
+        "trials": 1,
+        "wins": 1
+      },
+      "B": {
+        "method_id": "a2e13b4a-817b-4b37-9a36-1ec23771a9e4",
+        "trials": 1,
+        "wins": 1
+      },
+      "trials": 2,
+      "last_outcome": {
+        "chosen": "A",
+        "is_success": true,
+        "quality_score": 1.0,
+        "at": "2026-04-03 23:28:02"
+      }
+    }
+  },
+  "methods": {
+    "3ec26d26-3fb3-4c91-a2c0-d30e9f071801": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-01 13:02:33"
+    },
+    "f75f9ccd-5791-4df8-a986-db0173efaee2": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-01 13:04:15"
+    },
+    "790cc766-81be-4f53-8288-5fc9c1485208": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-01 13:05:46"
+    },
+    "c26bb1d6-7ab7-4d87-a9b4-b6dbb01326b7": {
+      "hits": 1,
+      "retrieval_score_avg": 0.2887,
+      "last_hit_at": "2026-04-01 21:55:23"
+    },
+    "563935e5-1012-48bb-9fa8-ef2eaf0272da": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-01 22:01:26"
+    },
+    "d7c59587-9c30-41e7-b065-832df8ed6421": {
+      "hits": 1,
+      "retrieval_score_avg": 0.0786,
+      "last_hit_at": "2026-04-03 13:59:36"
+    },
+    "ace5da18-c74b-4b28-9af5-2e57f540fcdc": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-03 14:06:06"
+    },
+    "cc9f2c16-1c08-4cb6-b287-f9027f977597": {
+      "hits": 4,
+      "retrieval_score_avg": 0.0824,
+      "last_hit_at": "2026-04-03 23:21:51"
+    },
+    "cdc3d2bb-b4e2-4691-bab1-3099cb2e2b02": {
+      "hits": 2,
+      "retrieval_score_avg": 0.0724,
+      "last_hit_at": "2026-04-03 22:27:54"
+    },
+    "12522343-ca44-4d55-9605-5756e35ee4fa": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-03 22:29:13",
+      "hits": 1,
+      "retrieval_score_avg": 0.0445,
+      "last_hit_at": "2026-04-03 22:34:17"
+    },
+    "16c80f51-68bb-4e4c-9771-5c733bcf92b9": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-03 22:32:34"
+    },
+    "1ccc8912-7791-4948-b19a-164c85e924b4": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-03 22:36:19"
+    },
+    "a2e13b4a-817b-4b37-9a36-1ec23771a9e4": {
+      "hits": 1,
+      "retrieval_score_avg": 0.0227,
+      "last_hit_at": "2026-04-03 23:01:03"
+    },
+    "eab1295a-8807-4d34-a392-d24d784bc0ba": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-03 23:07:19"
+    },
+    "ec7bb029-432d-4ad6-b512-44b19d266d52": {
+      "outcomes": 1,
+      "successes": 1,
+      "success_rate": 1.0,
+      "quality_score_avg": 1.0,
+      "last_quality_score": 1.0,
+      "last_outcome_at": "2026-04-03 23:28:02"
+    }
+  },
+  "updated_at": "2026-04-03 23:28:02"
 }

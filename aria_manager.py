@@ -19,11 +19,9 @@ from urllib.parse import parse_qs, quote, quote_plus, unquote_plus, urlparse
 
 import requests
 
-from automation import browser_driver, desktop_uia, interaction_intelligence, screen_ocr, wechat_driver
-from automation.app_profiles import wechat_heuristics
+from automation import browser_driver, desktop_uia, interaction_intelligence, screen_ocr
 from automation.app_profiles.action_merge import (
     normalize_actions_with_merge_rules,
-    wechat_heuristic_enabled,
 )
 from automation.app_profiles.prompt_fragments import load_planner_fragment
 from config import MODEL_POOL
@@ -46,18 +44,6 @@ _MATH_NOTATION_FOR_CHAT = (
     "需要时用常见 Unicode（如 ² ³ × ÷）或「a/b」「根号下…」等口语化写法，让读者不看符号约定也能读懂。"
     "若仍需严谨记法，在直观说明之后单独用一行「参考记法：」写出；避免正文大段只有 $...$、\\boxed、\\mathrm 等 LaTeX 源码（除非用户明确要求交 LaTeX 源码）。"
 )
-
-
-def format_wechat_need_disambiguation_message(candidates: list[str] | None) -> str:
-    """
-    将“同名消歧”错误候选转为给用户看的追问文案。
-    该函数尽量保持稳定输出，方便回归 sanity 检查。
-    """
-    cs = [str(c) for c in (candidates or []) if str(c).strip()]
-    if cs:
-        lines = "\n".join([f"{i + 1}) {c}" for i, c in enumerate(cs[:6])])
-        return f"需要消歧：找到多个匹配对象，请回复你要发送的选项序号（或直接回复完整名称/备注）。\n{lines}"
-    return "需要消歧：找到多个匹配对象，请补充接收人显示名/备注名/微信号等以便定位。"
 
 
 def _windows_desktop_path_bonus(p: Path) -> int:
@@ -389,12 +375,18 @@ class ARIAManager:
         "desktop_sequence",
         "web_fetch",
         "web_understand",
-        "wechat_send_message",
-        "wechat_open_chat",
-        "wechat_check_login",
         "screen_ocr",
         "screen_find_text",
         "screen_click_text",
+        "computer_screenshot",
+        "computer_click",
+        "computer_double_click",
+        "computer_move",
+        "computer_drag",
+        "computer_scroll",
+        "computer_key",
+        "computer_type",
+        "computer_wait",
     }
     HIGH_RISK_ACTION_TYPES = {
         "kb_delete_all",
@@ -414,12 +406,17 @@ class ARIAManager:
             "desktop_hotkey",
             "desktop_type",
             "desktop_sequence",
-            "wechat_send_message",
-            "wechat_open_chat",
-            "wechat_check_login",
-            "screen_ocr",
-            "screen_find_text",
+            "screen_ocr",            "screen_find_text",
             "screen_click_text",
+            "computer_screenshot",
+            "computer_click",
+            "computer_double_click",
+            "computer_move",
+            "computer_drag",
+            "computer_scroll",
+            "computer_key",
+            "computer_type",
+            "computer_wait",
             "media_summarize",
         }
     )
@@ -446,12 +443,18 @@ class ARIAManager:
                 "desktop_hotkey",
                 "desktop_type",
                 "desktop_sequence",
-                "wechat_send_message",
-                "wechat_open_chat",
-                "wechat_check_login",
                 "screen_ocr",
                 "screen_find_text",
                 "screen_click_text",
+                "computer_screenshot",
+                "computer_click",
+                "computer_double_click",
+                "computer_move",
+                "computer_drag",
+                "computer_scroll",
+                "computer_key",
+                "computer_type",
+                "computer_wait",
                 "media_summarize",
             }
         ),
@@ -654,12 +657,18 @@ class ARIAManager:
             "desktop_sequence": self._exec_desktop_sequence,
             "web_fetch": self._exec_web_fetch,
             "web_understand": self._exec_web_understand,
-            "wechat_send_message": self._exec_wechat_send_message,
-            "wechat_open_chat": self._exec_wechat_open_chat,
-            "wechat_check_login": self._exec_wechat_check_login,
             "screen_ocr": self._exec_screen_ocr,
             "screen_find_text": self._exec_screen_find_text,
             "screen_click_text": self._exec_screen_click_text,
+            "computer_screenshot": self._exec_computer_screenshot,
+            "computer_click": self._exec_computer_click,
+            "computer_double_click": self._exec_computer_double_click,
+            "computer_move": self._exec_computer_move,
+            "computer_drag": self._exec_computer_drag,
+            "computer_scroll": self._exec_computer_scroll,
+            "computer_key": self._exec_computer_key,
+            "computer_type": self._exec_computer_type,
+            "computer_wait": self._exec_computer_wait,
         }
         self.execution_sessions: dict[str, dict[str, Any]] = {}
         self.execution_lock = threading.Lock()
@@ -684,6 +693,10 @@ class ARIAManager:
         self._turn_vision_data_urls: list[str] = []
         self._turn_reasoning_effort: str | None = None
         self.workspace_mode = self._normalize_workspace_mode(os.getenv("ARIA_DEFAULT_WORKSPACE_MODE") or "aria")
+        from automation.app_framework import ApplicationRegistry
+        self.app_registry = ApplicationRegistry()
+        from runtime.orchestration import OrchestrationFacade
+        self.orchestration = OrchestrationFacade(self)
 
     def _default_reasoning_effort_from_env(self) -> str:
         raw = (os.getenv("REASONING_EFFORT_DEFAULT") or "medium").strip().lower()
@@ -1086,8 +1099,6 @@ class ARIAManager:
         """本机自动化类任务不应走 learn_from_external 生成「上网找步骤」式方法论。"""
         s = str((task_info or {}).get("execution_surface") or "").strip().lower()
         if s in ("local_desktop", "local", "desktop", "desktop_automation"):
-            return True
-        if wechat_heuristics.wechat_send_or_open_intent(user_input or ""):
             return True
         return False
 
@@ -1533,91 +1544,8 @@ class ARIAManager:
             return False
         return True
 
-    def _user_utterances_for_wechat_planning(self, dialogue_context: str, user_input: str) -> str:
-        """仅拼接历史中 User 行与本轮输入，供微信意图与解析使用（不含 Assistant，避免助手说明干扰）。"""
-        parts: list[str] = []
-        dc = (dialogue_context or "").strip()
-        if dc:
-            for line in dc.split("\n"):
-                s = line.strip()
-                if s.startswith("User:"):
-                    u = s[5:].strip()
-                    if u:
-                        parts.append(u)
-        cur = (user_input or "").strip()
-        if cur:
-            parts.append(cur)
-        out = "\n".join(parts).strip()
-        if len(out) > 8000:
-            out = out[-8000:]
-        return out
-
-    def _wechat_is_short_ack(self, s: str) -> bool:
-        """短回复（确认/收到等），解析联系人时应回退到上一轮实质内容而非本句。"""
-        t = (s or "").strip()
-        if not t or len(t) > 36:
-            return False
-        return bool(
-            re.match(
-                r"^(好的|好|确认|执行|继续|行|OK|ok|可以|嗯|是的|明白|收到|知道了|谢谢|不用了|取消|稍等|等等)$",
-                t,
-                re.I,
-            )
-        )
-
-    def _wechat_focus_parse_text(self, turn_text: str, wx_scope: str) -> str:
-        """多轮 User 拼接时优先本轮；否则取最后一条非「收到类」的 User 句，避免命中历史中第一个联系人。"""
-        tt = (turn_text or "").strip()
-        if wechat_heuristics.wechat_send_or_open_intent(tt) and not self._wechat_is_short_ack(tt):
-            return tt
-        lines = [x.strip() for x in (wx_scope or "").split("\n") if x.strip()]
-        while lines and self._wechat_is_short_ack(lines[-1]):
-            lines.pop()
-        if not lines:
-            return tt
-        return lines[-1]
-
-    def _wechat_planning_intent_and_source(self, turn_text: str, dialogue_context: str) -> tuple[bool, str, str]:
-        """是否走微信链路、用于启发式/抽槽的源文本、仅 User 拼成的上下文（供 strip/override 辅助判定）。"""
-        wx_scope = self._user_utterances_for_wechat_planning(dialogue_context, turn_text)
-        intent_turn = wechat_heuristics.wechat_send_or_open_intent(turn_text)
-        intent_scope = wechat_heuristics.wechat_send_or_open_intent(wx_scope)
-        if not (intent_turn or intent_scope):
-            return False, turn_text, wx_scope
-        wx_src = self._wechat_focus_parse_text(turn_text, wx_scope)
-        return True, wx_src, wx_scope
-
-    def should_invalidate_pending_for_new_wechat_turn(self, turn_text: str, dialogue_context: str) -> bool:
-        """本轮是否像新的微信发信指令（非短确认），用于作废上一条待确认计划，避免确认时仍执行上一联系人。"""
-        t = (turn_text or "").strip()
-        if not t or self._wechat_is_short_ack(t):
-            return False
-        return bool(wechat_heuristics.wechat_send_or_open_intent(t))
-
-    def _should_override_plan_with_wechat(
-        self, user_text: str, plan: dict[str, Any], wx_scope: str | None = None
-    ) -> bool:
-        if not (
-            wechat_heuristics.wechat_send_or_open_intent(user_text)
-            or (wechat_heuristics.wechat_send_or_open_intent(wx_scope) if wx_scope else False)
-        ):
-            return False
-        mode = str(plan.get("mode") or "").strip().lower()
-        actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
-        for a in actions:
-            if not isinstance(a, dict):
-                continue
-            t = self._normalize_action_type_alias(str(a.get("type") or ""))
-            if t.startswith("wechat_"):
-                return False
-        if mode == "clarify":
-            return False
-        if mode in ("qa", "small_talk", "") or mode == "action":
-            return self._actions_are_web_research_only(actions)
-        return False
-
     def _strip_contradictory_web_actions(
-        self, user_text: str, plan: dict[str, Any], wx_scope: str | None = None
+        self, user_text: str, plan: dict[str, Any]
     ) -> None:
         """当模型判定为本地执行或启发式为本地任务，且用户未明确要求上网时，移除误加的联网检索类动作。"""
         if not isinstance(plan, dict) or plan.get("mode") == "clarify":
@@ -1628,10 +1556,7 @@ class ARIAManager:
         if tf == "web_information":
             return
         local_tf = tf in ("local_execute", "qa_only")
-        wx_hit = wechat_heuristics.wechat_send_or_open_intent(user_text) or (
-            wechat_heuristics.wechat_send_or_open_intent(wx_scope) if wx_scope else False
-        )
-        local_h = wx_hit or self._user_intent_local_doc_edit(user_text)
+        local_h = self._user_intent_local_doc_edit(user_text)
         should_strip = local_tf or local_h or (tf == "mixed" and local_h)
         if not should_strip:
             return
@@ -1874,8 +1799,6 @@ class ARIAManager:
             return
         if self._user_intent_browser_only(text):
             return
-        if wechat_heuristics.wechat_send_or_open_intent(text):
-            return
         for action in actions:
             if not isinstance(action, dict):
                 return
@@ -2029,13 +1952,6 @@ class ARIAManager:
                 "requires_double_confirmation": False,
             }
 
-        wechat_ctx, wx_src, wx_scope = self._wechat_planning_intent_and_source(text, dialogue_context)
-
-        if wechat_heuristic_enabled() and wechat_ctx:
-            wechat_heuristic = wechat_heuristics.heuristic_plan_wechat(wx_src, self.requires_double_confirmation)
-            if wechat_heuristic:
-                return wechat_heuristic
-
         doc_style_plan = self._heuristic_docx_style_plan(text)
         if doc_style_plan:
             self._mend_browser_open_actions(text, doc_style_plan)
@@ -2076,7 +1992,6 @@ class ARIAManager:
                     "能力边界（须严格遵守，勿向用户承诺未启用的能力）："
                     + browser_driver.capability_summary_for_planner()
                     + desktop_uia.capability_summary_for_planner()
-                    + wechat_driver.get_capability_summary()
                     + screen_ocr.get_capability_summary()
                     + "desktop_open_app：params.app 或顶层 target 填应用名/路径；Windows 下会扫描本机桌面（含 OneDrive 桌面）、开始菜单与微信/WPS 等常见安装路径，再启动；仍失败时让用户提供 .exe 完整路径。"
                     "本地文档/表格：能确定相对工作区的路径与内容时优先 file_write（params.path、params.content、mode overwrite|append）；格式/路径/是否覆盖不明时用 mode=clarify 追问，勿直接拒绝。"
@@ -2099,8 +2014,8 @@ class ARIAManager:
                     "media_summarize：视频摘要。params.url（YouTube 等公开页，服务端 oEmbed 元数据）或 params.path（工作区内 .mp4/.webm，需本机 ffmpeg 抽帧 + 多模态）；勿承诺完整听懂对白若无字幕。"
                     "desktop_hotkey/desktop_type/desktop_sequence：仅当 ARIA_DESKTOP_UIA=1 且 Windows 上已安装 pywinauto 时为真实注入，否则为模拟。"
                     + load_planner_fragment("planner_desktop_apps_fragment.txt")
-                    + "用户明确要求发微信/企业微信消息时：必须输出 mode=action 且包含 wechat_send_message（可前置 wechat_check_login），禁止用 mode=clarify 以「违规」「无法执行」等理由拒绝；若环境可能缺依赖，仍输出该动作并在 reason 中提示安装 pywinauto 或 playwright，由执行阶段返回具体错误。"
-                    "screen_ocr/screen_find_text/screen_click_text：屏幕 OCR 识别与操作；screen_ocr 截取屏幕并识别文字（params.region 可选，params.lang 默认 chi_sim+eng）；screen_find_text 查找指定文字位置（params.text 必填）；screen_click_text 点击找到的文字（用 pyautogui 模拟鼠标）。须安装 Tesseract OCR（Windows: https://github.com/UB-Mannheim/tesseract/wiki），未安装时执行会返回安装提示。"
+                    + self._computer_use_capability_summary()
+                    + "screen_ocr/screen_find_text/screen_click_text：屏幕 OCR 识别与操作；须安装 Tesseract OCR，未安装时执行会失败；本机 Tesseract 可用性见上方预检结果。"
                     "web_fetch：服务端抓取并抽取正文（params.url）；web_understand：抓取后由 params.question 指定要让模型回答的问题，并生成理解与摘要（需 API Key）。"
                     "仅当 task_form=web_information 或 mixed（且联网部分确有必要）时，才输出 web_understand/web_fetch；"
                     "task_form=local_execute 时 actions 中不得出现 web_understand/web_fetch，也不得用「打开搜索引擎」代替本机动作。"
@@ -2127,14 +2042,9 @@ class ARIAManager:
         plan = self.normalize_action_plan(llm_plan) if llm_plan else {}
         plan = self._apply_task_form_tool_allowlist(plan)
         if plan.get("mode") != "clarify":
-            self._strip_contradictory_web_actions(text, plan, wx_scope=wx_scope)
+            self._strip_contradictory_web_actions(text, plan)
         if plan.get("mode") == "clarify":
             return plan
-        if wechat_heuristic_enabled():
-            hp_fix = wechat_heuristics.heuristic_plan_wechat(wx_src, self.requires_double_confirmation)
-            if hp_fix and self._should_override_plan_with_wechat(text, plan, wx_scope):
-                self._mend_browser_open_actions(text, hp_fix)
-                return hp_fix
         if plan and plan.get("mode") not in ("qa", "clarify"):
             acts_early = plan.get("actions") if isinstance(plan.get("actions"), list) else []
             if acts_early:
@@ -2219,26 +2129,7 @@ class ARIAManager:
             }
             self._mend_browser_open_actions(text, plan_fw)
             return plan_fw
-        if wechat_ctx:
-            hp_retry = None
-            if wechat_heuristic_enabled():
-                hp_retry = wechat_heuristics.heuristic_plan_wechat(wx_src, self.requires_double_confirmation)
-            if hp_retry:
-                self._mend_browser_open_actions(text, hp_retry)
-                return hp_retry
-            slot_plan = self._llm_plan_wechat_send_slots(wx_src, dialogue_context)
-            if slot_plan:
-                self._mend_browser_open_actions(text, slot_plan)
-                return slot_plan
-            return {
-                "mode": "clarify",
-                "summary": "请补充两项信息以便生成发送动作：1）接收人显示名（或群名）；2）要发送的正文。",
-                "requires_confirmation": True,
-                "actions": [],
-                "requires_double_confirmation": False,
-                "choices": [],
-            }
-        elif self._user_explicitly_requests_web_information(text):
+        if self._user_explicitly_requests_web_information(text):
             fetch_url = self._default_search_url_for_fetch(text)
             open_url = self._default_search_url(text)
             q = text[:2000] if len(text) > 2000 else text
@@ -2271,123 +2162,6 @@ class ARIAManager:
             self._enrich_research_actions(text, plan_ws)
             return plan_ws
         return {"mode": "qa", "summary": "未识别为可执行动作", "requires_confirmation": True, "actions": []}
-
-    def _llm_plan_wechat_send_slots(self, user_text: str, dialogue_context: str = "") -> dict[str, Any] | None:
-        """语义抽槽生成 wechat_send_message 计划；无法确定时返回 None（上层转 clarify）。"""
-        t = (user_text or "").strip()
-        if not t:
-            return None
-        block = (
-            f"【本会话近期对话】\n{(dialogue_context or '').strip()}\n\n【本轮用户输入】\n{t}"
-            if (dialogue_context or "").strip()
-            else t
-        )
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是微信/企业微信「发送文字消息」意图解析器。"
-                    "根据用户话判断是否要开始向某个联系人或群聊会话投递一段正文。"
-                    "只输出一个 JSON 对象，禁止 markdown、禁止联网检索、禁止废话。"
-                    "字段："
-                    "intent_send(布尔)，"
-                    "contact_name(字符串，会话列表/聊天顶栏显示的名称，不确定则空)，"
-                    "contact_hint(字符串，消歧提示，如备注名/微信号/群标识，不确定则空)，"
-                    "message(字符串，要发出的正文，不含操纵类客套句)，"
-                    "is_enterprise(布尔，是否企业微信/企微)，"
-                    "confidence(0到1的小数，对收件人与正文判断的把握)。"
-                    "intent_send 仅在为 true 且能推断出具体正文时取 true；仅打开聊天、查登录、或语义不清则为 false。"
-                    "从任意口语、标点、中英文昵称中推断收件人与正文。"
-                ),
-            },
-            {"role": "user", "content": block},
-        ]
-        llm_text = self._call_llm(messages, fallback_text="", agent_code="WeChatSlotParser", reasoning_effort="minimal")
-        data = self._extract_json_object(llm_text)
-        if not data:
-            return None
-        intent = data.get("intent_send")
-        intent_ok = intent is True or str(intent).strip().lower() in ("1", "true", "yes")
-        if not intent_ok:
-            return None
-        contact = str(data.get("contact_name") or "").strip()
-        message = str(data.get("message") or "").strip()
-        contact_hint = str(data.get("contact_hint") or "").strip()
-        is_ent = data.get("is_enterprise")
-        is_enterprise = is_ent is True or str(is_ent).strip().lower() in ("1", "true", "yes")
-        try:
-            conf = float(data.get("confidence", 0.85))
-        except (TypeError, ValueError):
-            conf = 0.85
-        if conf < 0.35:
-            return None
-        if not contact or not message:
-            return None
-        action: dict[str, Any] = {
-            "type": "wechat_send_message",
-            "target": contact,
-            "filters": {},
-            "params": {
-                "contact_name": contact,
-                "message": message,
-                "is_enterprise": is_enterprise,
-                "contact_hint": contact_hint,
-            },
-            "risk": "medium",
-            "reason": "由语义抽槽得到的微信发送动作（须用户确认后执行）",
-        }
-        acts = [action]
-        return {
-            "mode": "action",
-            "summary": f"识别为向「{contact}」发送微信消息",
-            "requires_confirmation": True,
-            "actions": acts,
-            "requires_double_confirmation": self.requires_double_confirmation(acts),
-        }
-
-    def supplement_wechat_plan_if_applicable(
-        self, user_input: str, dialogue_context: str, plan: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        """HTTP 层安全网：主规划无可执行动作时，对微信本机任务强制补 wechat_send_message，避免落多 Agent 空谈。"""
-        if not isinstance(plan, dict):
-            return None
-        if str(plan.get("mode") or "").strip().lower() == "clarify":
-            return None
-        acts = plan.get("actions") if isinstance(plan.get("actions"), list) else []
-        if str(plan.get("mode") or "").strip().lower() == "action" and acts:
-            return None
-        wechat_ctx, wx_src, _ = self._wechat_planning_intent_and_source(user_input, dialogue_context)
-        if not wechat_ctx:
-            return None
-        preview = wx_src[:160] + ("…" if len(wx_src) > 160 else "")
-        self.push_event(
-            "plan_wechat_supplement",
-            "success",
-            "TaskParser",
-            "主规划未产出可执行动作，启用微信专用补规划",
-            {"preview": preview},
-        )
-        self.push_log("TaskParser", "微信补规划：启发式或抽槽", "running")
-        if wechat_heuristic_enabled():
-            hp = wechat_heuristics.heuristic_plan_wechat(wx_src, self.requires_double_confirmation)
-            if hp:
-                self._mend_browser_open_actions(user_input, hp)
-                self.push_log("TaskParser", "微信补规划：启发式命中", "completed")
-                return hp
-        slot = self._llm_plan_wechat_send_slots(wx_src, dialogue_context)
-        if slot:
-            self._mend_browser_open_actions(user_input, slot)
-            self.push_log("TaskParser", "微信补规划：语义抽槽命中", "completed")
-            return slot
-        self.push_log("TaskParser", "微信补规划：需用户补充收件人与正文", "completed")
-        return {
-            "mode": "clarify",
-            "summary": "请补充：接收人显示名（或群名）与要发送的正文。",
-            "requires_confirmation": True,
-            "actions": [],
-            "requires_double_confirmation": False,
-            "choices": [],
-        }
 
     def format_clarify_plan_for_user(self, plan: dict[str, Any]) -> str:
         s = str(plan.get("summary") or "").strip()
@@ -2891,9 +2665,31 @@ class ARIAManager:
         return (
             browser_driver.capability_summary_for_planner()
             + desktop_uia.capability_summary_for_planner()
-            + wechat_driver.get_capability_summary()
             + screen_ocr.get_capability_summary()
+            + self._computer_use_capability_summary()
         )
+
+    def _computer_use_capability_summary(self) -> str:
+        """预检 computer_use 和 OCR 可用性，返回给 planner 的状态说明。"""
+        from automation import computer_use
+        lines: list[str] = []
+        # computer_use 可用性
+        if computer_use.is_computer_use_enabled():
+            lines.append("【computer_use 已启用】computer_screenshot/click/type/key 等动作可用。")
+        else:
+            lines.append("【computer_use 已禁用】所有 computer_* 动作不可用（ARIA_COMPUTER_USE=0）。")
+        # OCR (Tesseract) 可用性
+        try:
+            import pytesseract
+            pytesseract.get_tesseract_version()
+            lines.append("【Tesseract OCR 可用】screen_ocr/screen_find_text/screen_click_text 可用。")
+        except Exception:
+            lines.append(
+                "【Tesseract OCR 不可用】screen_ocr/screen_find_text/screen_click_text 均会失败，"
+                "禁止在计划中使用这三个动作；改用 computer_screenshot + computer_click 视觉方案。"
+            )
+        return "\n".join(lines) + "\n"
+
 
     def _react_format_trace_for_prompt(self, trace: list[dict[str, Any]], max_obs_chars: int = 3500) -> str:
         if not trace:
@@ -4582,38 +4378,6 @@ class ARIAManager:
         web_alternative = None
         try:
             if os.name == "nt":
-                app_lower = app.lower()
-                is_wechat = ("微信" in app) or ("wechat" in app_lower) or ("weixin" in app_lower)
-                is_wxwork = ("企业微信" in app) or ("企微" in app) or ("wxwork" in app_lower)
-                # 避免“已开微信却再拉起一个实例”：先尝试连接并前置已有窗口。
-                if is_wechat or is_wxwork:
-                    try:
-                        router = wechat_driver.create_router(
-                            prefer_desktop=True,
-                            is_enterprise=bool(is_wxwork and not is_wechat),
-                        )
-                        desktop = getattr(router, "desktop", None)
-                        if desktop:
-                            ok_conn, _ = desktop.connect()
-                            if ok_conn:
-                                ok_focus, _ = desktop._activate_wechat_window(
-                                    max_attempts=4, allow_mouse_click=True, use_alt_trick=True
-                                )
-                                if ok_focus:
-                                    shots = self._capture_screenshot("desktop_open_app")
-                                    return {
-                                        "success": True,
-                                        "message": f"desktop_app_already_running:{app}",
-                                        "stdout": f"{app} 已在运行，已切换到现有窗口",
-                                        "artifacts": [],
-                                        "screenshots": shots,
-                                        "strategy_path": "rule_path",
-                                        "confidence": 0.95,
-                                        "fallback_used": False,
-                                    }
-                    except Exception:
-                        # 若复用现有窗口失败，再走原有启动流程
-                        pass
                 resolved, info = _windows_resolve_app_executable(app)
                 web_alternative = info.get("web_alternative")
                 if resolved is not None:
@@ -4810,301 +4574,6 @@ class ARIAManager:
             "fallback_used": False,
         }
 
-    def _exec_wechat_send_message(
-        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
-    ) -> dict[str, Any]:
-        """
-        执行微信发送消息动作
-
-        params:
-            contact_name: 联系人名称
-            message: 消息内容
-            use_desktop: 是否优先使用桌面客户端（默认 True）
-            is_enterprise: 是否为企业微信（默认 False）
-        """
-        params = action.get("params") or {}
-        request_id = str(action.get("_request_id") or self.current_request_id or "").strip()
-        contact_name = str(params.get("contact_name") or params.get("contact") or action.get("target") or "").strip()
-        message = str(params.get("message") or params.get("content") or "")
-        raw_contact_hint = params.get("contact_hint") or params.get("hint") or params.get("disambiguation_hint") or ""
-        contact_hint = str(raw_contact_hint).strip()
-        if not contact_hint:
-            contact_hint = None
-        use_desktop = params.get("use_desktop", True)
-        is_enterprise = params.get("is_enterprise", False)
-        raw_skip = params.get("skip_contact_search", params.get("skip_search", False))
-        skip_contact_search = raw_skip is True or str(raw_skip).strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-
-        # 检查配置
-        prefer_desktop = os.getenv("ARIA_WECHAT_PREFER_DESKTOP", "1").strip().lower() in ("1", "true", "yes", "on")
-        if not prefer_desktop:
-            use_desktop = False
-
-        # 关键改进：如果桌面版可用，强制使用桌面版
-        if wechat_driver.is_desktop_available() and os.name == "nt":
-            use_desktop = True
-            logger.info("检测到桌面微信可用，强制使用桌面版")
-
-        shots: list[str] = []
-
-        # 检查是否有可用的驱动
-        if not wechat_driver.is_desktop_available() and not wechat_driver.is_web_available():
-            hint = wechat_driver.driver_install_hint()
-            msg = "wechat_driver_not_available:微信自动化驱动不可用。" + (
-                hint or "请安装 pywinauto（Windows）或 playwright。"
-            )
-            return {
-                "success": False,
-                "message": msg,
-                "stderr": msg,
-                "stdout": msg,
-                "artifacts": [],
-                "screenshots": shots,
-            }
-
-        # 检查联系人和消息（已打开会话且仅发消息时可为空名，但建议仍填以便日志）
-        if not contact_name and not skip_contact_search:
-            return {
-                "success": False,
-                "message": "missing_contact_name:请指定联系人名称",
-                "stderr": "missing_contact_name",
-                "artifacts": [],
-                "screenshots": shots,
-            }
-
-        if not message:
-            return {
-                "success": False,
-                "message": "missing_message:请指定消息内容",
-                "stderr": "missing_message",
-                "artifacts": [],
-                "screenshots": shots,
-            }
-
-        try:
-            if self.is_cancelled(request_id):
-                return {
-                    "success": False,
-                    "message": "request_cancelled",
-                    "stderr": "request_cancelled_by_user",
-                    "retryable": False,
-                    "artifacts": [],
-                    "screenshots": shots,
-                }
-            # 创建路由器
-            router = wechat_driver.create_router(prefer_desktop=use_desktop, is_enterprise=is_enterprise)
-
-            # 发送消息（先执行再截屏，避免截屏抢占焦点导致快捷键落到浏览器）
-            result = router.send_message(
-                contact_name,
-                message,
-                skip_search=skip_contact_search,
-                contact_hint=contact_hint,
-                cancel_checker=lambda: self.is_cancelled(request_id),
-            )
-            if self.is_cancelled(request_id):
-                return {
-                    "success": False,
-                    "message": "request_cancelled",
-                    "stderr": "request_cancelled_by_user",
-                    "retryable": False,
-                    "artifacts": [],
-                    "screenshots": shots,
-                }
-            shots = self._capture_screenshot("wechat_send")
-
-            if result.get("success"):
-                method = result.get("method", "unknown")
-                fallback_msg = "（回退到网页版）" if result.get("fallback_used") else ""
-                warning = result.get("warning")
-
-                # 构建响应消息 - 不再说"已发送"，而是"已执行发送操作"
-                response = {
-                    "success": True,
-                    "message": f"wechat_message_executed:{contact_name}{fallback_msg}",
-                    "stdout": f"已执行向 {contact_name} 发送消息的操作（使用{method}）",
-                    "artifacts": [],
-                    "screenshots": shots,
-                    "strategy_path": "rule_path",
-                    "confidence": 0.86,
-                    "fallback_used": bool(result.get("fallback_used")),
-                }
-
-                # 添加警告信息（如果有）
-                if warning:
-                    response["warning"] = warning
-                    response["stdout"] += f"\n\n⚠️ 重要提示：\n{warning}\n\n请检查微信窗口确认消息是否真正发送成功。"
-                else:
-                    response["stdout"] += "\n\n请检查微信窗口确认消息已送达。"
-
-                return response
-            else:
-                error = result.get("error", "unknown")
-                if error == "wechat_need_disambiguation":
-                    candidates = result.get("candidates")
-                    msg = format_wechat_need_disambiguation_message(candidates if isinstance(candidates, list) else [])
-                    return {
-                        "success": False,
-                        "message": msg,
-                        "stderr": error,
-                        "retryable": True,
-                        "artifacts": [],
-                        "screenshots": shots,
-                        "strategy_path": "rule_path",
-                        "confidence": 0.25,
-                        "safe_block_reason": "need_disambiguation",
-                    }
-                return {
-                    "success": False,
-                    "message": "wechat_send_failed",
-                    "stderr": error,
-                    "artifacts": [],
-                    "screenshots": shots,
-                    "strategy_path": "rule_path",
-                    "confidence": 0.3,
-                    "safe_block_reason": "unresolved_target",
-                }
-
-        except Exception as e:
-            shots = self._capture_screenshot("wechat_send_err")
-            return {
-                "success": False,
-                "message": "wechat_send_error",
-                "stderr": str(e),
-                "artifacts": [],
-                "screenshots": shots,
-            }
-
-    def _exec_wechat_open_chat(
-        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
-    ) -> dict[str, Any]:
-        """
-        执行打开微信聊天窗口动作
-
-        params:
-            contact_name: 联系人名称
-            use_desktop: 是否优先使用桌面客户端（默认 True）
-            is_enterprise: 是否为企业微信（默认 False）
-        """
-        params = action.get("params") or {}
-        contact_name = str(params.get("contact_name") or params.get("contact") or action.get("target") or "").strip()
-        use_desktop = params.get("use_desktop", True)
-        is_enterprise = params.get("is_enterprise", False)
-
-        prefer_desktop = os.getenv("ARIA_WECHAT_PREFER_DESKTOP", "1").strip().lower() in ("1", "true", "yes", "on")
-        if not prefer_desktop:
-            use_desktop = False
-
-        # 关键改进：如果桌面版可用，强制使用桌面版
-        if wechat_driver.is_desktop_available() and os.name == "nt":
-            use_desktop = True
-            logger.info("检测到桌面微信可用，强制使用桌面版")
-
-        shots: list[str] = []
-
-        if not contact_name:
-            return {
-                "success": False,
-                "message": "missing_contact_name:请指定联系人名称",
-                "stderr": "missing_contact_name",
-                "artifacts": [],
-                "screenshots": shots,
-            }
-
-        try:
-            router = wechat_driver.create_router(prefer_desktop=use_desktop, is_enterprise=is_enterprise)
-            result = router.open_chat(contact_name)
-            shots = self._capture_screenshot("wechat_open")
-
-            if result.get("success"):
-                method = result.get("method", "unknown")
-                return {
-                    "success": True,
-                    "message": f"wechat_chat_opened:{contact_name}",
-                    "stdout": f"已打开与 {contact_name} 的聊天窗口（{method}）",
-                    "artifacts": [],
-                    "screenshots": shots,
-                }
-            else:
-                error = result.get("error", "unknown")
-                return {
-                    "success": False,
-                    "message": "wechat_open_failed",
-                    "stderr": error,
-                    "artifacts": [],
-                    "screenshots": shots,
-                }
-
-        except Exception as e:
-            shots = self._capture_screenshot("wechat_open_err")
-            return {
-                "success": False,
-                "message": "wechat_open_error",
-                "stderr": str(e),
-                "artifacts": [],
-                "screenshots": shots,
-            }
-
-    def _exec_wechat_check_login(
-        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
-    ) -> dict[str, Any]:
-        """
-        执行检查微信登录状态动作
-
-        params:
-            is_enterprise: 是否为企业微信（默认 False）
-        """
-        params = action.get("params") or {}
-        is_enterprise = params.get("is_enterprise", False)
-
-        shots: list[str] = []
-
-        try:
-            prefer_desktop = os.getenv("ARIA_WECHAT_PREFER_DESKTOP", "1").strip().lower() in ("1", "true", "yes", "on")
-            router = wechat_driver.create_router(prefer_desktop=prefer_desktop, is_enterprise=is_enterprise)
-            login_status = router.check_login()
-            shots = self._capture_screenshot("wechat_login")
-
-            desktop_status = login_status.get("desktop_logged_in", False)
-            web_status = login_status.get("web_logged_in", False)
-
-            if desktop_status or web_status:
-                status_msg = []
-                if desktop_status:
-                    status_msg.append("桌面客户端已登录")
-                if web_status:
-                    status_msg.append("网页版已登录")
-                return {
-                    "success": True,
-                    "message": "wechat_logged_in",
-                    "stdout": "；".join(status_msg),
-                    "artifacts": [],
-                    "screenshots": shots,
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": "wechat_not_logged_in",
-                    "stderr": "桌面客户端和网页版均未登录",
-                    "artifacts": [],
-                    "screenshots": shots,
-                }
-
-        except Exception as e:
-            shots = self._capture_screenshot("wechat_login_err")
-            return {
-                "success": False,
-                "message": "wechat_check_login_error",
-                "stderr": str(e),
-                "artifacts": [],
-                "screenshots": shots,
-            }
-
     def _exec_screen_ocr(
         self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
     ) -> dict[str, Any]:
@@ -5254,6 +4723,84 @@ class ARIAManager:
                 "screenshots": shots,
             }
 
+    # ------------------------------------------------------------------ #
+    # computer_use 动作执行器                                               #
+    # ------------------------------------------------------------------ #
+
+    def _exec_computer_screenshot(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
+        from automation import computer_use
+        params = action.get("params") or {}
+        result = computer_use.run_screenshot_info(params)
+        # 同时把截图内容放入 vision 上下文
+        try:
+            data_url = computer_use.capture_jpeg_data_url()
+            if data_url:
+                self._turn_vision_data_urls.append(data_url)
+                result["screenshot_data_url"] = data_url
+        except Exception:
+            pass
+        return result
+
+    def _exec_computer_click(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
+        from automation import computer_use
+        params = action.get("params") or {}
+        button = str(params.get("button") or "left")
+        return computer_use.run_click(params, button=button, clicks=1)
+
+    def _exec_computer_double_click(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
+        from automation import computer_use
+        params = action.get("params") or {}
+        button = str(params.get("button") or "left")
+        return computer_use.run_click(params, button=button, clicks=2)
+
+    def _exec_computer_move(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
+        from automation import computer_use
+        params = action.get("params") or {}
+        return computer_use.run_move(params)
+
+    def _exec_computer_drag(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
+        from automation import computer_use
+        params = action.get("params") or {}
+        return computer_use.run_drag(params)
+
+    def _exec_computer_scroll(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
+        from automation import computer_use
+        params = action.get("params") or {}
+        return computer_use.run_scroll(params)
+
+    def _exec_computer_key(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
+        from automation import computer_use
+        params = action.get("params") or {}
+        return computer_use.run_key(params)
+
+    def _exec_computer_type(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
+        from automation import computer_use
+        params = action.get("params") or {}
+        return computer_use.run_type_text(params)
+
+    def _exec_computer_wait(
+        self, action: dict[str, Any], conversation_id: str, methodology_manager: Any, conversation_manager: Any
+    ) -> dict[str, Any]:
+        from automation import computer_use
+        params = action.get("params") or {}
+        return computer_use.run_wait(params)
+
     def generate_small_talk_reply(self, user_input: str) -> str:
         text = (user_input or "").strip()
         user_line = text or ("请根据图片简单打个招呼或说明你能看到的内容。" if self._turn_vision_data_urls else "你好")
@@ -5336,8 +4883,6 @@ class ARIAManager:
             tr = raw_tr if raw_tr in ("high", "low") else self._infer_temporal_risk(user_input)
             es_raw = str(data.get("execution_surface") or "").strip().lower()
             es = es_raw if es_raw in ("local_desktop", "web_research", "conversation") else "conversation"
-            if es == "conversation" and wechat_heuristics.wechat_send_or_open_intent(user_input):
-                es = "local_desktop"
             task_info.update(
                 {
                     "task_id": fallback_task_info["task_id"],
@@ -5353,8 +4898,6 @@ class ARIAManager:
             )
         else:
             task_info["temporal_risk"] = self._infer_temporal_risk(user_input)
-            if wechat_heuristics.wechat_send_or_open_intent(user_input):
-                task_info["execution_surface"] = "local_desktop"
 
         # 写入短期记忆
         self.stm.task_id = task_info["task_id"]
@@ -5703,6 +5246,13 @@ class ARIAManager:
         return sub_tasks
 
     # 5. 动态生成Agent
+    def choose_collaboration_topology(self, task_info: dict, sub_tasks: list) -> str:
+        """根据任务复杂度和子任务数量决定协作拓扑：pipeline 或 parallel_with_merge。"""
+        complexity = int((task_info or {}).get("complexity_score") or 0)
+        if len(sub_tasks) >= 3 or complexity >= 5:
+            return "parallel_with_merge"
+        return "pipeline"
+
     def create_agents(self, sub_tasks: list) -> dict:
         self.check_cancelled("agent_create_start")
         self.push_event("agent_create", "running", "TaskSplitter", "PM 正在组建执行小队")
@@ -6052,3 +5602,44 @@ class ARIAManager:
     # 清空执行日志
     def clear_execution_log(self):
         self.execution_log = []
+
+    # ------------------------------------------------------------------ #
+    # runtime/ 依赖的桩方法                                                  #
+    # ------------------------------------------------------------------ #
+
+    def _math_notation_hint(self) -> str:
+        return _MATH_NOTATION_FOR_CHAT
+
+    def _memory_system_prompt_fragment(self) -> str:
+        try:
+            auto_memory = getattr(self, "auto_memory", None)
+            if auto_memory and hasattr(auto_memory, "get_system_prompt_fragment"):
+                return auto_memory.get_system_prompt_fragment()
+        except Exception:
+            pass
+        return ""
+
+    SAFE_ACTION_TYPES: frozenset = frozenset(
+        {
+            "web_understand",
+            "web_fetch",
+            "browser_find",
+            "browser_scroll",
+            "browser_wait",
+            "computer_screenshot",
+            "screen_ocr",
+            "screen_find_text",
+            "file_read",
+        }
+    )
+
+    def run_taor_pipeline(
+        self,
+        user_input: str,
+        dialogue_context: str = "",
+        conversation_id: str = "",
+    ) -> dict:
+        from runtime.taor_loop import TAORLoop
+
+        self.current_conversation_id = conversation_id
+        return TAORLoop(self).run(user_input, dialogue_context)

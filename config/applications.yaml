@@ -1,0 +1,14 @@
+# ARIA 应用插件配置
+# 通过此文件注册应用插件，支持内置和第三方应用
+#
+# 每个条目格式：
+#   module: Python 模块路径（相对项目根目录）
+#   class: 模块内的应用类名
+#   enabled: 是否启用（默认 true）
+#
+# 示例（第三方自定义应用）：
+#   - module: custom_apps.my_app
+#     class: MyCustomApplication
+#     enabled: true
+
+applications: []
